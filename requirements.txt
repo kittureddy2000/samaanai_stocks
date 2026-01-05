@@ -8,7 +8,7 @@ google-genai>=1.0.0
 pandas>=2.0.0
 numpy>=1.24.0
 yfinance>=0.2.0
-pandas-ta>=0.3.14b
+pandas-ta
 
 # Scheduling
 schedule>=1.2.0
@@ -23,3 +23,7 @@ sqlalchemy>=2.0.0
 
 # HTTP
 requests>=2.31.0
+
+# Web Server
+flask>=3.0.0
+flask-cors>=4.0.0
