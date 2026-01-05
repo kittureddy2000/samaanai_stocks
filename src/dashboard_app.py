@@ -184,9 +184,28 @@ def get_watchlist():
 
 @app.route('/api/trades')
 def get_trades():
-    """Get recent trade history."""
+    """Get recent trade history from Alpaca."""
     try:
-        trades = db.get_recent_trades(limit=20)
+        # Fetch order history directly from Alpaca API
+        orders = trading_client.get_orders_history(limit=30)
+        
+        # Format for display
+        trades = []
+        for order in orders:
+            trades.append({
+                'id': order.get('id'),
+                'symbol': order.get('symbol'),
+                'action': order.get('side', '').upper(),
+                'quantity': int(order.get('qty', 0)),
+                'filled_quantity': int(order.get('filled_qty', 0)),
+                'order_type': order.get('type', '').replace('OrderType.', ''),
+                'status': order.get('status', '').replace('OrderStatus.', ''),
+                'limit_price': order.get('limit_price'),
+                'filled_price': order.get('filled_avg_price'),
+                'created_at': order.get('created_at'),
+                'filled_at': order.get('filled_at')
+            })
+        
         return jsonify({'trades': trades})
     except Exception as e:
         return jsonify({'error': str(e)}), 500

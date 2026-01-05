@@ -238,6 +238,38 @@ class AlpacaTradingClient:
             logger.error(f"Error getting open orders: {e}")
             return []
     
+    def get_orders_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get recent order history from Alpaca.
+        
+        Args:
+            limit: Maximum number of orders to return
+            
+        Returns:
+            List of order dictionaries (most recent first)
+        """
+        try:
+            # Get all orders (filled, cancelled, etc.)
+            request = GetOrdersRequest(
+                status=QueryOrderStatus.ALL,
+                limit=limit
+            )
+            orders = self.client.get_orders(request)
+            
+            # Format and return
+            history = []
+            for order in orders:
+                formatted = self._format_order(order)
+                # Add additional fields for display
+                formatted['filled_at'] = str(order.filled_at) if order.filled_at else None
+                formatted['cancelled_at'] = str(order.cancelled_at) if order.cancelled_at else None
+                history.append(formatted)
+            
+            return history
+            
+        except Exception as e:
+            logger.error(f"Error getting order history: {e}")
+            return []
+    
     def cancel_order(self, order_id: str) -> bool:
         """Cancel an order.
         

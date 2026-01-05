@@ -77,19 +77,19 @@ class TradingConfig(BaseModel):
     ]
     
     # Trading strategy: 'momentum', 'mean_reversion', 'contrarian', 'balanced'
-    strategy: str = "balanced"
+    strategy: str = os.getenv("TRADING_STRATEGY", "balanced")
     
-    # Analysis frequency in minutes (reduced for faster execution)
-    analysis_interval_minutes: int = 5  # Was 15, now faster
+    # Analysis frequency in minutes (configurable via env var)
+    analysis_interval_minutes: int = int(os.getenv("ANALYSIS_INTERVAL", "15"))
     
-    # Risk parameters
-    max_position_pct: float = 0.10  # Max 10% of portfolio per position
-    max_daily_loss_pct: float = 0.03  # Max 3% daily loss
-    min_confidence: float = 0.70  # Min confidence to execute trade
+    # Risk parameters (configurable via env vars)
+    max_position_pct: float = float(os.getenv("MAX_POSITION_PCT", "0.10"))  # Max 10% of portfolio per position
+    max_daily_loss_pct: float = float(os.getenv("MAX_DAILY_LOSS_PCT", "0.03"))  # Max 3% daily loss
+    min_confidence: float = float(os.getenv("MIN_CONFIDENCE", "0.70"))  # Min confidence to execute trade
     
-    # Stop loss / take profit (as percentage)
-    default_stop_loss_pct: float = 0.05  # 5% stop loss
-    default_take_profit_pct: float = 0.10  # 10% take profit
+    # Stop loss / take profit (as percentage) - configurable via env vars
+    default_stop_loss_pct: float = float(os.getenv("STOP_LOSS_PCT", "0.05"))  # 5% stop loss
+    default_take_profit_pct: float = float(os.getenv("TAKE_PROFIT_PCT", "0.10"))  # 10% take profit
     
     # Market hours (Eastern Time)
     market_open_hour: int = 9
