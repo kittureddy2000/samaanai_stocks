@@ -5,7 +5,7 @@ on:
     branches: [main]
 
 env:
-  GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID_PROD }}
+  GCP_PROJECT: samaanai-prod-1009-124126
   GCP_REGION: us-central1
   BACKEND_SERVICE: trading-api
   FRONTEND_SERVICE: trading-dashboard

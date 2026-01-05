@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import config, validate_config
 from utils.logger import setup_logger
 from utils.database import db
+from utils.slack import slack, notify_trade
 from llm.analyst import TradingAnalyst
 from trading.alpaca_client import AlpacaTradingClient
 from trading.order_manager import OrderManager
@@ -129,6 +130,16 @@ class TradingAgent:
             logger.info(f"\n🚀 Executing {len(valid_trades)} trade(s)...")
             executed = self.order_manager.execute_trades(valid_trades)
             
+            # Send Slack notifications for each trade
+            for trade in valid_trades:
+                notify_trade({
+                    'action': trade.action,
+                    'symbol': trade.symbol,
+                    'quantity': trade.quantity,
+                    'confidence': trade.confidence,
+                    'reasoning': trade.reasoning
+                })
+            
             # Record trades to database
             for i, trade in enumerate(valid_trades):
                 order_info = executed[i] if i < len(executed) else None
@@ -184,6 +195,9 @@ class TradingAgent:
         
         self.running = True
         
+        # Notify Slack that agent started
+        slack.notify_agent_started()
+        
         # Schedule the analysis
         schedule.every(config.trading.analysis_interval_minutes).minutes.do(self.run_analysis_cycle)
         
@@ -195,10 +209,11 @@ class TradingAgent:
             schedule.run_pending()
             time.sleep(1)
     
-    def stop(self):
+    def stop(self, reason: str = "Normal shutdown"):
         """Stop the trading agent."""
         logger.info("Stopping trading agent...")
         self.running = False
+        slack.notify_agent_stopped(reason)
         logger.info("Trading agent stopped")
 
 
