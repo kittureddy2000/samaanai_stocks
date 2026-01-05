@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM Trading Agent - Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="dashboard">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <h1>🤖 LLM Trading Agent</h1>
+                <span class="market-status" id="marketStatus">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Loading...</span>
+                </span>
+            </div>
+            <div class="header-right">
+                <span class="last-updated" id="lastUpdated">Last updated: --:--</span>
+                <button class="btn-refresh" onclick="refreshData()">🔄 Refresh</button>
+            </div>
+        </header>
+
+        <!-- Main Grid -->
+        <div class="main-grid">
+            <!-- Portfolio Card -->
+            <div class="card portfolio-card">
+                <h2>💰 Portfolio</h2>
+                <div class="portfolio-value">
+                    <span class="label">Total Value</span>
+                    <span class="value" id="portfolioValue">$0.00</span>
+                </div>
+                <div class="portfolio-stats">
+                    <div class="stat">
+                        <span class="label">Cash</span>
+                        <span class="value" id="cashValue">$0.00</span>
+                    </div>
+                    <div class="stat">
+                        <span class="label">Buying Power</span>
+                        <span class="value" id="buyingPower">$0.00</span>
+                    </div>
+                    <div class="stat">
+                        <span class="label">Daily Change</span>
+                        <span class="value" id="dailyChange">$0.00</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Risk Status Card -->
+            <div class="card risk-card">
+                <h2>🛡️ Risk Status</h2>
+                <div class="risk-level" id="riskLevel">
+                    <span class="risk-dot"></span>
+                    <span class="risk-text">LOW</span>
+                </div>
+                <div class="risk-stats">
+                    <div class="stat">
+                        <span class="label">Daily Trades</span>
+                        <span class="value" id="dailyTrades">0</span>
+                    </div>
+                    <div class="stat">
+                        <span class="label">Daily Loss</span>
+                        <span class="value" id="dailyLoss">$0.00</span>
+                    </div>
+                    <div class="stat">
+                        <span class="label">Max Position</span>
+                        <span class="value" id="maxPosition">$0.00</span>
+                    </div>
+                    <div class="stat">
+                        <span class="label">Kill Switch</span>
+                        <span class="value" id="killSwitch">Inactive ✅</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Watchlist Card -->
+            <div class="card watchlist-card">
+                <h2>📈 Watchlist</h2>
+                <div class="watchlist" id="watchlist">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+
+            <!-- Positions Card -->
+            <div class="card positions-card">
+                <h2>📋 Positions</h2>
+                <div class="positions" id="positions">
+                    <div class="empty-state">No positions (100% cash)</div>
+                </div>
+            </div>
+
+            <!-- Trade History Card -->
+            <div class="card trades-card">
+                <h2>📜 Trade History</h2>
+                <div class="trades-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Action</th>
+                                <th>Symbol</th>
+                                <th>Qty</th>
+                                <th>Status</th>
+                                <th>Confidence</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tradesBody">
+                            <tr>
+                                <td colspan="6" class="empty-state">No trades yet</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Config Card -->
+            <div class="card config-card">
+                <h2>⚙️ Configuration</h2>
+                <div class="config-grid" id="configGrid">
+                    <div class="config-item">
+                        <span class="label">Analysis Interval</span>
+                        <span class="value">15 min</span>
+                    </div>
+                    <div class="config-item">
+                        <span class="label">Max Position %</span>
+                        <span class="value">10%</span>
+                    </div>
+                    <div class="config-item">
+                        <span class="label">Max Daily Loss</span>
+                        <span class="value">3%</span>
+                    </div>
+                    <div class="config-item">
+                        <span class="label">Min Confidence</span>
+                        <span class="value">70%</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

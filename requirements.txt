@@ -1,0 +1,25 @@
+# Trading API (newer alpaca-py SDK)
+alpaca-py>=0.30.0
+
+# LLM (newer google-genai SDK)
+google-genai>=1.0.0
+
+# Data & Analysis
+pandas>=2.0.0
+numpy>=1.24.0
+yfinance>=0.2.0
+pandas-ta>=0.3.14b
+
+# Scheduling
+schedule>=1.2.0
+
+# Utilities
+python-dotenv>=1.0.0
+loguru>=0.7.0
+pydantic>=2.0.0
+
+# Database
+sqlalchemy>=2.0.0
+
+# HTTP
+requests>=2.31.0
