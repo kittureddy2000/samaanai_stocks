@@ -34,6 +34,71 @@ def health_check():
     return jsonify({'status': 'healthy', 'service': 'trading-api'}), 200
 
 
+@app.route('/api/analyze', methods=['POST'])
+def run_analysis():
+    """Run trading analysis cycle - triggered by Cloud Scheduler."""
+    try:
+        from llm.analyst import TradingAnalyst
+        from trading.order_manager import OrderManager
+        from utils.slack import slack, notify_trade
+        
+        # Check if market is open
+        if not trading_client.is_market_open():
+            return jsonify({
+                'status': 'skipped',
+                'message': 'Market is closed'
+            }), 200
+        
+        # Run analysis
+        analyst = TradingAnalyst()
+        order_manager = OrderManager()
+        
+        account = trading_client.get_account()
+        positions = trading_client.get_positions()
+        
+        response = analyst.analyze_and_recommend(
+            cash=account['cash'],
+            portfolio_value=account['portfolio_value'],
+            positions=positions
+        )
+        
+        if not response:
+            return jsonify({'status': 'no_response', 'message': 'No LLM response'}), 200
+        
+        # Filter and execute trades
+        valid_trades = analyst.filter_by_confidence(response.trades)
+        
+        if not valid_trades:
+            return jsonify({
+                'status': 'no_trades',
+                'message': 'No high-confidence trades',
+                'analysis': response.analysis_summary
+            }), 200
+        
+        # Execute trades
+        executed = order_manager.execute_trades(valid_trades)
+        
+        # Send Slack notifications
+        for trade in valid_trades:
+            notify_trade({
+                'action': trade.action,
+                'symbol': trade.symbol,
+                'quantity': trade.quantity,
+                'confidence': trade.confidence,
+                'reasoning': trade.reasoning
+            })
+        
+        return jsonify({
+            'status': 'success',
+            'trades_executed': len(executed),
+            'trades': [{'symbol': t.symbol, 'action': t.action, 'quantity': t.quantity} for t in valid_trades],
+            'analysis': response.analysis_summary
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 @app.route('/')
 def index():
     """Render the main dashboard."""
