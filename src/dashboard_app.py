@@ -14,11 +14,15 @@ from trading.portfolio import PortfolioTracker
 from trading.risk_controls import RiskManager
 from data.data_aggregator import DataAggregator
 from utils.database import db
+from utils.auth import init_auth
 
 app = Flask(__name__, 
             template_folder='dashboard/templates',
             static_folder='dashboard/static')
-CORS(app)
+CORS(app, supports_credentials=True)
+
+# Initialize authentication (Google OAuth)
+init_auth(app)
 
 # Initialize clients
 trading_client = AlpacaTradingClient()

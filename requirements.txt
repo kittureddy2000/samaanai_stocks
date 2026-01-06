@@ -27,3 +27,5 @@ requests>=2.31.0
 # Web Server
 flask>=3.0.0
 flask-cors>=4.0.0
+flask-dance>=7.0.0
+flask-login>=0.6.0
