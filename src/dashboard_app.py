@@ -231,57 +231,109 @@ def get_config():
 
 @app.route('/api/indicators')
 def get_indicators():
-    """Get technical indicators for watchlist symbols."""
+    """Get technical indicators for watchlist symbols (optimized for Cloud Run)."""
     try:
-        indicators = []
-        for symbol in config.trading.watchlist:
-            try:
-                # Get stock analysis which includes technical indicators
-                data = data_aggregator.get_stock_analysis(symbol, days=30)
-                if data and 'technical' in data:
-                    tech = data['technical']
-                    indicators.append({
-                        'symbol': symbol,
-                        'price': data.get('current_price', 0),
-                        'change_pct': data.get('price_change_pct', 0),
-                        'rsi': tech.get('rsi'),
-                        'rsi_signal': tech.get('rsi_signal', 'NEUTRAL'),
-                        'macd': tech.get('macd'),
-                        'macd_signal': tech.get('macd_signal'),
-                        'macd_histogram': tech.get('macd_histogram'),
-                        'macd_trend': tech.get('macd_trend', 'NEUTRAL'),
-                        'sma_20': tech.get('sma_20'),
-                        'sma_50': tech.get('sma_50'),
-                        'ema_12': tech.get('ema_12'),
-                        'bb_upper': tech.get('bb_upper'),
-                        'bb_middle': tech.get('bb_middle'),
-                        'bb_lower': tech.get('bb_lower'),
-                        'bb_signal': tech.get('bb_signal', 'NEUTRAL'),
-                        'volume_signal': tech.get('volume_signal', 'NORMAL'),
-                        'overall_signal': data.get('signals', {}).get('overall', 'NEUTRAL')
-                    })
-                else:
-                    indicators.append({
-                        'symbol': symbol,
-                        'price': data.get('current_price', 0) if data else 0,
-                        'rsi': None,
-                        'rsi_signal': 'N/A',
-                        'macd': None,
-                        'macd_trend': 'N/A',
-                        'overall_signal': 'NO DATA'
-                    })
-            except Exception as e:
-                indicators.append({
-                    'symbol': symbol,
-                    'error': str(e)
-                })
+        import concurrent.futures
+        from data.technical_indicators import TechnicalIndicators
+        import yfinance as yf
         
-        return jsonify({'indicators': indicators})
+        # Limit to top 10 most popular symbols for speed
+        top_symbols = config.trading.watchlist[:10]
+        
+        def get_indicator_for_symbol(symbol):
+            """Get indicator data for a single symbol."""
+            try:
+                # Get historical data from yfinance
+                ticker = yf.Ticker(symbol)
+                df = ticker.history(period="3mo")
+                
+                if df.empty or len(df) < 30:
+                    return {
+                        'symbol': symbol,
+                        'price': 0,
+                        'rsi': None,
+                        'rsi_signal': 'NO DATA',
+                        'macd': None,
+                        'macd_trend': 'NO DATA',
+                        'overall_signal': 'NO DATA'
+                    }
+                
+                # Calculate indicators
+                tech = TechnicalIndicators(df)
+                tech_data = tech.calculate_all()
+                
+                # Get current price
+                current_price = float(df['Close'].iloc[-1]) if len(df) > 0 else 0
+                
+                # Extract RSI
+                rsi = tech_data.get('rsi')
+                if rsi is not None and hasattr(rsi, 'iloc'):
+                    rsi = float(rsi.iloc[-1]) if len(rsi) > 0 and not rsi.empty else None
+                
+                # Determine RSI signal
+                rsi_signal = 'NEUTRAL'
+                if rsi is not None:
+                    if rsi > 70:
+                        rsi_signal = 'OVERBOUGHT'
+                    elif rsi < 30:
+                        rsi_signal = 'OVERSOLD'
+                
+                # Extract MACD
+                macd = tech_data.get('macd')
+                macd_sig = tech_data.get('macd_signal')
+                if macd is not None and hasattr(macd, 'iloc'):
+                    macd = float(macd.iloc[-1]) if len(macd) > 0 and not macd.empty else None
+                if macd_sig is not None and hasattr(macd_sig, 'iloc'):
+                    macd_sig = float(macd_sig.iloc[-1]) if len(macd_sig) > 0 else None
+                
+                # Determine MACD trend
+                macd_trend = 'NEUTRAL'
+                if macd is not None and macd_sig is not None:
+                    if macd > macd_sig:
+                        macd_trend = 'BULLISH'
+                    else:
+                        macd_trend = 'BEARISH'
+                
+                # Overall signal
+                overall = 'NEUTRAL'
+                if rsi_signal == 'OVERSOLD' or macd_trend == 'BULLISH':
+                    overall = 'BULLISH'
+                elif rsi_signal == 'OVERBOUGHT' or macd_trend == 'BEARISH':
+                    overall = 'BEARISH'
+                
+                return {
+                    'symbol': symbol,
+                    'price': round(current_price, 2),
+                    'rsi': round(rsi, 2) if rsi else None,
+                    'rsi_signal': rsi_signal,
+                    'macd': round(macd, 4) if macd else None,
+                    'macd_trend': macd_trend,
+                    'overall_signal': overall
+                }
+                
+            except Exception as e:
+                return {
+                    'symbol': symbol,
+                    'price': 0,
+                    'rsi': None,
+                    'rsi_signal': 'ERROR',
+                    'macd': None,
+                    'macd_trend': 'ERROR',
+                    'overall_signal': 'ERROR'
+                }
+        
+        # Use thread pool for parallel fetching (max 5 concurrent)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            results = list(executor.map(get_indicator_for_symbol, top_symbols))
+        
+        return jsonify({'indicators': results})
+        
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': str(e), 'indicators': []}), 500
 
 
 if __name__ == '__main__':
     print("🚀 Starting Trading Dashboard...")
     print("📊 Open http://localhost:5000 in your browser")
     app.run(debug=True, port=5000)
+
