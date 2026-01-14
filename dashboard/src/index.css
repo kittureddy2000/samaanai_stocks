@@ -470,3 +470,91 @@ td {
     font-size: 32px;
   }
 }
+
+/* Enhanced Position Item */
+.position-item {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 12px;
+  padding: 16px;
+  background: var(--glass);
+  border-radius: 12px;
+  border-left: 3px solid var(--accent-blue);
+}
+
+@media (max-width: 1200px) {
+  .position-item {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .position-item {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Symbol Highlighting */
+.symbol-highlight {
+  color: var(--accent-blue) !important;
+  font-weight: 700 !important;
+}
+
+/* Status Badges */
+.status-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.status-badge.filled {
+  background: rgba(0, 217, 165, 0.2);
+  color: var(--accent-green);
+}
+
+.status-badge.canceled,
+.status-badge.cancelled {
+  background: rgba(139, 139, 158, 0.2);
+  color: var(--text-secondary);
+}
+
+.status-badge.pending,
+.status-badge.open,
+.status-badge.new {
+  background: rgba(77, 166, 255, 0.2);
+  color: var(--accent-blue);
+}
+
+.status-badge.rejected,
+.status-badge.failed {
+  background: rgba(255, 71, 87, 0.2);
+  color: var(--accent-red);
+}
+
+/* Watchlist More */
+.watchlist-more {
+  text-align: center;
+  padding: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+/* Indicators Card at bottom */
+.indicators-card {
+  grid-column: span 3;
+}
+
+@media (max-width: 1200px) {
+  .indicators-card {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 768px) {
+  .indicators-card {
+    grid-column: span 1;
+  }
+}

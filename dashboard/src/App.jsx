@@ -159,9 +159,134 @@ function App() {
           </div>
         </div>
 
-        {/* Technical Indicators Card */}
+        {/* Positions Card - MOVED UP */}
+        <div className="card positions-card">
+          <h2>📋 Current Positions ({portfolio?.positions?.length || 0})</h2>
+          <div className="positions">
+            {(portfolio?.positions?.length || 0) === 0 ? (
+              <div className="empty-state">No positions (100% cash)</div>
+            ) : (
+              portfolio.positions.map((pos) => (
+                <div key={pos.symbol} className="position-item">
+                  <div>
+                    <span className="label">Symbol</span>
+                    <span className="value symbol-highlight">{pos.symbol}</span>
+                  </div>
+                  <div>
+                    <span className="label">Shares</span>
+                    <span className="value">{pos.qty}</span>
+                  </div>
+                  <div>
+                    <span className="label">Avg Cost</span>
+                    <span className="value">{formatCurrency(pos.avg_entry_price)}</span>
+                  </div>
+                  <div>
+                    <span className="label">Current</span>
+                    <span className="value">{formatCurrency(pos.current_price)}</span>
+                  </div>
+                  <div>
+                    <span className="label">Market Value</span>
+                    <span className="value">{formatCurrency(pos.market_value)}</span>
+                  </div>
+                  <div>
+                    <span className="label">Unrealized P&L</span>
+                    <span className={`value ${pos.unrealized_pl >= 0 ? 'positive' : 'negative'}`}>
+                      {formatCurrency(pos.unrealized_pl)} ({formatPercent(pos.unrealized_plpc * 100)})
+                    </span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Trade History Card - MOVED UP */}
+        <div className="card trades-card">
+          <h2>📜 Trade History</h2>
+          <div className="trades-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Action</th>
+                  <th>Symbol</th>
+                  <th>Qty</th>
+                  <th>Price</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {trades.length === 0 ? (
+                  <tr>
+                    <td colSpan="6" className="empty-state">No trades yet - Agent will execute during market hours</td>
+                  </tr>
+                ) : (
+                  trades.map((trade, idx) => (
+                    <tr key={idx}>
+                      <td>{trade.created_at ? new Date(trade.created_at).toLocaleString() : '--'}</td>
+                      <td className={`action-${(trade.action || '').toLowerCase()}`}>{trade.action}</td>
+                      <td className="symbol-highlight">{trade.symbol}</td>
+                      <td>{trade.quantity || trade.filled_quantity || 0}</td>
+                      <td>{trade.filled_price ? formatCurrency(trade.filled_price) : '--'}</td>
+                      <td><span className={`status-badge ${(trade.status || '').toLowerCase()}`}>{trade.status}</span></td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Watchlist Card */}
+        <div className="card watchlist-card">
+          <h2>📈 Watchlist ({watchlist.length} symbols)</h2>
+          <div className="watchlist">
+            {watchlist.slice(0, 12).map((item) => (
+              <div key={item.symbol} className="watchlist-item">
+                <span className="symbol">{item.symbol}</span>
+                <span className="price">{item.price > 0 ? formatCurrency(item.price) : '--'}</span>
+              </div>
+            ))}
+            {watchlist.length > 12 && (
+              <div className="watchlist-more">+{watchlist.length - 12} more</div>
+            )}
+          </div>
+        </div>
+
+        {/* Config Card */}
+        <div className="card config-card">
+          <h2>⚙️ Agent Configuration</h2>
+          <div className="config-grid">
+            <div className="config-item">
+              <span className="label">Analysis Interval</span>
+              <span className="value">{config?.analysis_interval || 30} min</span>
+            </div>
+            <div className="config-item">
+              <span className="label">Max Position %</span>
+              <span className="value">{config?.max_position_pct || 10}%</span>
+            </div>
+            <div className="config-item">
+              <span className="label">Max Daily Loss</span>
+              <span className="value">{config?.max_daily_loss_pct || 3}%</span>
+            </div>
+            <div className="config-item">
+              <span className="label">Min Confidence</span>
+              <span className="value">{config?.min_confidence || 70}%</span>
+            </div>
+            <div className="config-item">
+              <span className="label">Stop Loss</span>
+              <span className="value">{config?.stop_loss_pct || 5}%</span>
+            </div>
+            <div className="config-item">
+              <span className="label">Take Profit</span>
+              <span className="value">{config?.take_profit_pct || 10}%</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Technical Indicators Card - MOVED TO BOTTOM */}
         <div className="card indicators-card">
-          <h2>📊 Technical Indicators</h2>
+          <h2>📊 Technical Indicators (Top 10)</h2>
           <div className="indicators-table">
             <table>
               <thead>
@@ -181,7 +306,7 @@ function App() {
                 ) : (
                   indicators.map((ind) => (
                     <tr key={ind.symbol}>
-                      <td className="symbol-cell">{ind.symbol}</td>
+                      <td className="symbol-highlight">{ind.symbol}</td>
                       <td>{ind.price ? formatCurrency(ind.price) : '--'}</td>
                       <td>
                         <span className={getSignalClass(ind.rsi_signal)}>
@@ -205,120 +330,6 @@ function App() {
                 )}
               </tbody>
             </table>
-          </div>
-        </div>
-
-        {/* Watchlist Card */}
-        <div className="card watchlist-card">
-          <h2>📈 Watchlist</h2>
-          <div className="watchlist">
-            {watchlist.map((item) => (
-              <div key={item.symbol} className="watchlist-item">
-                <span className="symbol">{item.symbol}</span>
-                <span className="price">{item.price > 0 ? formatCurrency(item.price) : '--'}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Positions Card */}
-        <div className="card positions-card">
-          <h2>📋 Positions</h2>
-          <div className="positions">
-            {(portfolio?.positions?.length || 0) === 0 ? (
-              <div className="empty-state">No positions (100% cash)</div>
-            ) : (
-              portfolio.positions.map((pos) => (
-                <div key={pos.symbol} className="position-item">
-                  <div>
-                    <span className="label">Symbol</span>
-                    <span className="value">{pos.symbol}</span>
-                  </div>
-                  <div>
-                    <span className="label">Quantity</span>
-                    <span className="value">{pos.qty}</span>
-                  </div>
-                  <div>
-                    <span className="label">Entry</span>
-                    <span className="value">{formatCurrency(pos.avg_entry_price)}</span>
-                  </div>
-                  <div>
-                    <span className="label">P&L</span>
-                    <span className={`value ${pos.unrealized_pl >= 0 ? 'positive' : 'negative'}`}>
-                      {formatCurrency(pos.unrealized_pl)}
-                    </span>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Trades Card */}
-        <div className="card trades-card">
-          <h2>📜 Trade History</h2>
-          <div className="trades-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Action</th>
-                  <th>Symbol</th>
-                  <th>Qty</th>
-                  <th>Status</th>
-                  <th>Confidence</th>
-                </tr>
-              </thead>
-              <tbody>
-                {trades.length === 0 ? (
-                  <tr>
-                    <td colSpan="6" className="empty-state">No trades yet</td>
-                  </tr>
-                ) : (
-                  trades.map((trade, idx) => (
-                    <tr key={idx}>
-                      <td>{new Date(trade.timestamp).toLocaleString()}</td>
-                      <td className={`action-${trade.action.toLowerCase()}`}>{trade.action}</td>
-                      <td>{trade.symbol}</td>
-                      <td>{trade.quantity}</td>
-                      <td>{trade.status}</td>
-                      <td>{(trade.confidence * 100).toFixed(0)}%</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Config Card */}
-        <div className="card config-card">
-          <h2>⚙️ Configuration</h2>
-          <div className="config-grid">
-            <div className="config-item">
-              <span className="label">Analysis Interval</span>
-              <span className="value">{config?.analysis_interval || 15} min</span>
-            </div>
-            <div className="config-item">
-              <span className="label">Max Position %</span>
-              <span className="value">{config?.max_position_pct || 10}%</span>
-            </div>
-            <div className="config-item">
-              <span className="label">Max Daily Loss</span>
-              <span className="value">{config?.max_daily_loss_pct || 3}%</span>
-            </div>
-            <div className="config-item">
-              <span className="label">Min Confidence</span>
-              <span className="value">{config?.min_confidence || 70}%</span>
-            </div>
-            <div className="config-item">
-              <span className="label">Stop Loss</span>
-              <span className="value">{config?.stop_loss_pct || 5}%</span>
-            </div>
-            <div className="config-item">
-              <span className="label">Take Profit</span>
-              <span className="value">{config?.take_profit_pct || 10}%</span>
-            </div>
           </div>
         </div>
       </div>
