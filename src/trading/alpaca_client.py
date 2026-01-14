@@ -259,9 +259,9 @@ class AlpacaTradingClient:
             history = []
             for order in orders:
                 formatted = self._format_order(order)
-                # Add additional fields for display
+                # Add additional fields for display (using getattr for safety)
                 formatted['filled_at'] = str(order.filled_at) if order.filled_at else None
-                formatted['cancelled_at'] = str(order.cancelled_at) if order.cancelled_at else None
+                formatted['canceled_at'] = str(getattr(order, 'canceled_at', None)) if getattr(order, 'canceled_at', None) else None
                 history.append(formatted)
             
             return history

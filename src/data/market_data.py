@@ -89,6 +89,7 @@ class MarketDataClient:
         Returns:
             DataFrame with OHLCV data or None
         """
+        # Try Alpaca IEX first
         try:
             end = datetime.now()
             start = end - timedelta(days=days)
@@ -104,28 +105,46 @@ class MarketDataClient:
             from alpaca.data.enums import DataFeed
             bars = self.client.get_stock_bars(request, feed=DataFeed.IEX)
             
-            if symbol not in bars.data:
-                return None
-            
-            # Convert to DataFrame
-            data = []
-            for bar in bars.data[symbol]:
-                data.append({
-                    'timestamp': bar.timestamp,
-                    'open': float(bar.open),
-                    'high': float(bar.high),
-                    'low': float(bar.low),
-                    'close': float(bar.close),
-                    'volume': int(bar.volume)
-                })
-            
-            df = pd.DataFrame(data)
-            df.set_index('timestamp', inplace=True)
-            return df
+            if symbol in bars.data and len(bars.data[symbol]) > 0:
+                # Convert to DataFrame
+                data = []
+                for bar in bars.data[symbol]:
+                    data.append({
+                        'timestamp': bar.timestamp,
+                        'open': float(bar.open),
+                        'high': float(bar.high),
+                        'low': float(bar.low),
+                        'close': float(bar.close),
+                        'volume': int(bar.volume)
+                    })
+                
+                df = pd.DataFrame(data)
+                df.set_index('timestamp', inplace=True)
+                logger.debug(f"Got {len(df)} bars from Alpaca IEX for {symbol}")
+                return df
             
         except Exception as e:
-            logger.error(f"Error fetching historical bars for {symbol}: {e}")
-            return None
+            logger.warning(f"Alpaca IEX failed for {symbol}: {e}")
+        
+        # Fallback to yfinance
+        try:
+            import yfinance as yf
+            logger.info(f"Falling back to yfinance for {symbol}")
+            
+            ticker = yf.Ticker(symbol)
+            period = "3mo" if days <= 90 else "1y"
+            df = ticker.history(period=period)
+            
+            if df is not None and len(df) > 0:
+                # Normalize column names to lowercase
+                df.columns = [c.lower() for c in df.columns]
+                logger.debug(f"Got {len(df)} bars from yfinance for {symbol}")
+                return df
+                
+        except Exception as e:
+            logger.error(f"yfinance also failed for {symbol}: {e}")
+        
+        return None
     
     def get_historical_bars_multi(
         self,
