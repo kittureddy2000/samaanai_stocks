@@ -275,9 +275,9 @@ body {
   color: var(--accent-green);
 }
 
-/* Positions Card */
+/* Positions Card - Full width */
 .positions-card {
-  grid-column: span 2;
+  grid-column: span 3;
 }
 
 .positions {
@@ -317,7 +317,7 @@ body {
   padding: 40px;
 }
 
-/* Trades Card */
+/* Trades Card - 2 columns */
 .trades-card {
   grid-column: span 2;
 }
@@ -401,10 +401,14 @@ td {
   background: rgba(255, 71, 87, 0.2);
 }
 
-/* Config Card */
+/* Config Card - pairs with watchlist */
+.config-card {
+  grid-column: span 2;
+}
+
 .config-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 12px;
 }
 
