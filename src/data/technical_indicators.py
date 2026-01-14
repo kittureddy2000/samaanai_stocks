@@ -14,8 +14,14 @@ class TechnicalIndicators:
         
         Args:
             df: DataFrame with columns: open, high, low, close, volume
+                (handles both lowercase and capitalized column names)
         """
         self.df = df.copy()
+        
+        # Normalize column names to lowercase for consistency
+        # Handles both yfinance (Close, High, Low, Open, Volume) 
+        # and alpaca (close, high, low, open, volume)
+        self.df.columns = [c.lower() for c in self.df.columns]
         
     def calculate_all(self) -> Dict[str, Any]:
         """Calculate all technical indicators.

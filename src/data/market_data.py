@@ -100,7 +100,9 @@ class MarketDataClient:
                 end=end
             )
             
-            bars = self.client.get_stock_bars(request)
+            # Use IEX feed (free) instead of SIP (paid subscription)
+            from alpaca.data.enums import DataFeed
+            bars = self.client.get_stock_bars(request, feed=DataFeed.IEX)
             
             if symbol not in bars.data:
                 return None
@@ -154,7 +156,9 @@ class MarketDataClient:
                 end=end
             )
             
-            bars = self.client.get_stock_bars(request)
+            # Use IEX feed (free) instead of SIP (paid subscription)
+            from alpaca.data.enums import DataFeed
+            bars = self.client.get_stock_bars(request, feed=DataFeed.IEX)
             
             for symbol in symbols:
                 if symbol in bars.data:
