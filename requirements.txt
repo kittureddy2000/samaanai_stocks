@@ -29,3 +29,8 @@ flask>=3.0.0
 flask-cors>=4.0.0
 flask-dance>=7.0.0
 flask-login>=0.6.0
+
+# User Management
+bcrypt>=4.0.0
+sqlalchemy>=2.0.0
+pg8000>=1.30.0

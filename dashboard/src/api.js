@@ -22,7 +22,17 @@ export const getCurrentUser = async () => {
     }
 };
 
-export const getLoginUrl = () => `${API_BASE}/auth/login`;
+export const register = async (email, password, name) => {
+    const response = await api.post('/auth/register', { email, password, name });
+    return response.data;
+};
+
+export const login = async (email, password) => {
+    const response = await api.post('/auth/login', { email, password });
+    return response.data;
+};
+
+export const getLoginUrl = () => `${API_BASE}/auth/google`;
 export const getLogoutUrl = () => `${API_BASE}/auth/logout`;
 
 // Data functions
