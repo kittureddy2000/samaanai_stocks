@@ -19,7 +19,17 @@ from utils.auth import init_auth
 app = Flask(__name__, 
             template_folder='dashboard/templates',
             static_folder='dashboard/static')
-CORS(app, supports_credentials=True)
+
+# Configure CORS - allow frontend origins with credentials
+CORS(app, 
+     supports_credentials=True,
+     origins=[
+         "http://localhost:5173",  # Vite dev server
+         "http://localhost:5000",  # Local backend
+         "https://trading-dashboard-staging-362270100637.us-central1.run.app",
+         "https://stg.trading.samaanai.com",
+         "https://trading.samaanai.com"
+     ])
 
 # Initialize authentication (Google OAuth)
 init_auth(app)

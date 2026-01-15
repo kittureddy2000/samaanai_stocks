@@ -6,8 +6,26 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 const api = axios.create({
     baseURL: API_BASE,
     timeout: 10000,
+    withCredentials: true, // Important for cookies/sessions
 });
 
+// Auth functions
+export const getCurrentUser = async () => {
+    try {
+        const response = await api.get('/auth/me');
+        return response.data;
+    } catch (error) {
+        if (error.response?.status === 401) {
+            return { authenticated: false };
+        }
+        throw error;
+    }
+};
+
+export const getLoginUrl = () => `${API_BASE}/auth/login`;
+export const getLogoutUrl = () => `${API_BASE}/auth/logout`;
+
+// Data functions
 export const getPortfolio = async () => {
     const response = await api.get('/api/portfolio');
     return response.data;
@@ -44,3 +62,4 @@ export const getIndicators = async () => {
 };
 
 export default api;
+
