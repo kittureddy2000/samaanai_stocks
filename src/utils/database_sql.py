@@ -12,7 +12,7 @@ Base = declarative_base()
 # Database configuration
 DB_USER = os.getenv('DB_USER', 'trading_user')
 DB_PASSWORD = os.getenv('DB_PASSWORD', '')
-DB_NAME = os.getenv('DB_NAME', 'trading_users')
+DB_NAME = os.getenv('DB_NAME', 'stock_trading')
 DB_HOST = os.getenv('DB_HOST', 'localhost')
 INSTANCE_CONNECTION_NAME = os.getenv('INSTANCE_CONNECTION_NAME', '')
 
@@ -31,7 +31,7 @@ def get_database_url():
     
     # Fallback to SQLite for local testing
     logger.warning("No database configured, using SQLite")
-    return "sqlite:///./trading_users.db"
+    return "sqlite:///./stock_trading.db"
 
 
 # Create engine and session
@@ -64,6 +64,7 @@ def init_db():
         # Import all models and create tables
         from models.user import User
         from models.trade import Trade, PortfolioSnapshot
+        from models.trading import Position, Order, Watchlist, AnalysisLog, TradingConfig
         Base.metadata.create_all(bind=engine)
         
         logger.info("Database initialized successfully")
