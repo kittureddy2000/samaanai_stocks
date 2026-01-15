@@ -45,55 +45,82 @@ class LLMClient:
     def analyze_market(
         self, 
         system_prompt: str, 
-        user_prompt: str
+        user_prompt: str,
+        max_retries: int = 3
     ) -> Optional[LLMResponse]:
-        """Send analysis request to the LLM.
+        """Send analysis request to the LLM with retry logic.
         
         Args:
             system_prompt: System role prompt
             user_prompt: User message with market data
+            max_retries: Maximum number of retry attempts for transient errors
             
         Returns:
             Parsed LLMResponse or None if failed
         """
-        try:
-            logger.info(f"Sending request to Gemini ({self.model})...")
-            
-            # Combine system and user prompts
-            full_prompt = f"{system_prompt}\n\n{user_prompt}"
-            
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=full_prompt,
-                config=types.GenerateContentConfig(
-                    temperature=self.temperature,
-                    response_mime_type="application/json"
+        import time
+        
+        # Combine system and user prompts
+        full_prompt = f"{system_prompt}\n\n{user_prompt}"
+        
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    # Exponential backoff: 5s, 15s, 45s
+                    wait_time = 5 * (3 ** attempt)
+                    logger.info(f"Retry attempt {attempt + 1}/{max_retries} after {wait_time}s delay...")
+                    time.sleep(wait_time)
+                
+                logger.info(f"Sending request to Gemini ({self.model})...")
+                
+                response = self.client.models.generate_content(
+                    model=self.model,
+                    contents=full_prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=self.temperature,
+                        response_mime_type="application/json"
+                    )
                 )
-            )
-            
-            # Extract the response content
-            content = response.text
-            logger.debug(f"Raw LLM response: {content}")
-            
-            # Parse JSON
-            data = json.loads(content)
-            
-            # Validate and convert to our response model
-            parsed = self._parse_response(data)
-            
-            if parsed:
-                logger.info(f"LLM analysis complete: {len(parsed.trades)} trade(s) recommended")
-                for trade in parsed.trades:
-                    logger.info(f"  → {trade.action} {trade.quantity} {trade.symbol} (confidence: {trade.confidence:.0%})")
-            
-            return parsed
-            
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse LLM response as JSON: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Error calling LLM API: {e}")
-            return None
+                
+                # Extract the response content
+                content = response.text
+                logger.debug(f"Raw LLM response: {content}")
+                
+                # Parse JSON
+                data = json.loads(content)
+                
+                # Validate and convert to our response model
+                parsed = self._parse_response(data)
+                
+                if parsed:
+                    logger.info(f"LLM analysis complete: {len(parsed.trades)} trade(s) recommended")
+                    for trade in parsed.trades:
+                        logger.info(f"  → {trade.action} {trade.quantity} {trade.symbol} (confidence: {trade.confidence:.0%})")
+                
+                return parsed
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse LLM response as JSON: {e}")
+                return None  # Don't retry JSON errors - they won't fix themselves
+                
+            except Exception as e:
+                last_error = e
+                error_str = str(e)
+                
+                # Check if it's a retryable error (503, 429, rate limit)
+                is_retryable = any(code in error_str for code in ['503', '429', 'UNAVAILABLE', 'overloaded', 'quota', 'RESOURCE_EXHAUSTED'])
+                
+                if is_retryable and attempt < max_retries - 1:
+                    logger.warning(f"Retryable error on attempt {attempt + 1}: {e}")
+                    continue
+                else:
+                    logger.error(f"Error calling LLM API (attempt {attempt + 1}): {e}")
+                    if not is_retryable:
+                        return None  # Don't retry non-retryable errors
+        
+        logger.error(f"All {max_retries} retry attempts failed. Last error: {last_error}")
+        return None
     
     def _parse_response(self, data: Dict[str, Any]) -> Optional[LLMResponse]:
         """Parse the raw JSON response into our model.
