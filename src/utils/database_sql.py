@@ -61,8 +61,9 @@ def init_db():
             sessionmaker(autocommit=False, autoflush=False, bind=engine)
         )
         
-        # Import models and create tables
+        # Import all models and create tables
         from models.user import User
+        from models.trade import Trade, PortfolioSnapshot
         Base.metadata.create_all(bind=engine)
         
         logger.info("Database initialized successfully")
