@@ -13,23 +13,25 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 logger = logging.getLogger(__name__)
 
 
-# Import trading services from src (keeping existing logic)
-# These will be imported when needed to avoid circular imports
+# Lazy import functions to avoid import errors during collectstatic
 def get_trading_client():
     """Get Alpaca trading client."""
-    from trading_api.services.alpaca_client import AlpacaTradingClient
+    from trading_api.services import get_alpaca_client
+    AlpacaTradingClient = get_alpaca_client()
     return AlpacaTradingClient()
 
 
 def get_risk_manager():
     """Get risk manager."""
-    from trading_api.services.risk_controls import RiskManager
+    from trading_api.services import get_risk_manager as _get_rm
+    RiskManager = _get_rm()
     return RiskManager()
 
 
 def get_data_aggregator():
     """Get data aggregator."""
-    from trading_api.services.data_aggregator import DataAggregator
+    from trading_api.services import get_data_aggregator as _get_da
+    DataAggregator = _get_da()
     return DataAggregator()
 
 
@@ -198,7 +200,8 @@ class IndicatorsView(APIView):
     def get(self, request):
         try:
             import yfinance as yf
-            from trading_api.services.technical_indicators import TechnicalIndicators
+            from trading_api.services import get_technical_indicators
+            TechnicalIndicators = get_technical_indicators()
             
             trading_config = settings.TRADING_CONFIG
             top_symbols = trading_config['WATCHLIST'][:10]
@@ -299,9 +302,14 @@ class AnalyzeView(APIView):
     
     def post(self, request):
         try:
-            from trading_api.services.analyst import TradingAnalyst
-            from trading_api.services.order_manager import OrderManager
-            from trading_api.services.slack import notify_trade
+            from trading_api.services import (
+                get_trading_analyst, 
+                get_order_manager, 
+                get_slack
+            )
+            TradingAnalyst = get_trading_analyst()
+            OrderManager = get_order_manager()
+            _, notify_trade = get_slack()
             
             trading_client = get_trading_client()
             
