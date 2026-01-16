@@ -37,6 +37,7 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"
 
-# Collect static files at startup and run with gunicorn
-CMD python manage.py collectstatic --noinput || true && \
+# Run migrations, collect static files, and start gunicorn
+CMD python manage.py migrate --noinput && \
+    python manage.py collectstatic --noinput || true && \
     exec gunicorn --bind :$PORT --workers 2 --threads 4 --timeout 120 backend.wsgi:application
