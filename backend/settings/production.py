@@ -18,9 +18,25 @@ def _check_secret_key():
         import warnings
         warnings.warn("DJANGO_SECRET_KEY not set - using dummy key (not safe for production)")
 
-# Allowed hosts from environment
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '*').split(',')
+# Allowed hosts from environment plus hardcoded Cloud Run domains
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '').split(',')
 ALLOWED_HOSTS = [host.strip() for host in ALLOWED_HOSTS if host.strip()]
+
+# Always include Cloud Run domains
+CLOUD_RUN_HOSTS = [
+    'trading-api-staging-hdp6ioqupa-uc.a.run.app',
+    'trading-dashboard-staging-hdp6ioqupa-uc.a.run.app',
+    'stg.trading.samaanai.com',
+    'trading.samaanai.com',
+    '.run.app',  # Wildcard for all Cloud Run
+]
+for host in CLOUD_RUN_HOSTS:
+    if host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(host)
+
+# Allow all hosts if none configured (fallback)
+if not ALLOWED_HOSTS:
+    ALLOWED_HOSTS = ['*']
 
 
 # Database - Google Cloud SQL (PostgreSQL)
