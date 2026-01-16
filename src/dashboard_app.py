@@ -2,6 +2,7 @@
 
 from flask import Flask, render_template, jsonify
 from flask_cors import CORS
+from werkzeug.middleware.proxy_fix import ProxyFix
 import sys
 import os
 
@@ -20,13 +21,21 @@ app = Flask(__name__,
             template_folder='dashboard/templates',
             static_folder='dashboard/static')
 
+# Fix for HTTPS behind Cloud Run proxy
+# This tells Flask to trust the X-Forwarded-Proto header
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
+# Also set this environment variable for Flask-Dance
+os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '0'  # Require HTTPS
+os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
+
 # Configure CORS - allow frontend origins with credentials
 CORS(app, 
      supports_credentials=True,
      origins=[
          "http://localhost:5173",  # Vite dev server
          "http://localhost:5000",  # Local backend
-         "https://trading-dashboard-staging-362270100637.us-central1.run.app",
+         "https://trading-dashboard-staging-hdp6ioqupa-uc.a.run.app",
          "https://stg.trading.samaanai.com",
          "https://trading.samaanai.com"
      ])
