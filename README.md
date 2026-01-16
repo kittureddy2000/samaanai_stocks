@@ -1,37 +1,121 @@
 # LLM Trading Agent
 
-An AI-powered stock trading agent that uses **Google Gemini** to analyze market data and make automated trading decisions on Alpaca's paper trading platform, with a React dashboard and Cloud Run deployment.
+An AI-powered stock trading agent that uses **Google Gemini** to analyze market data and make automated trading decisions on Alpaca's paper trading platform.
 
 ## 🚀 Live Demo
 
-- **Staging Dashboard**: https://stg.trading.samaanai.com
-- **Staging API**: https://trading-api-staging-362270100637.us-central1.run.app
+| Environment | Dashboard | API |
+|-------------|-----------|-----|
+| **Staging** | https://stg.trading.samaanai.com | https://trading-api-staging-*.run.app |
+| **Production** | https://trading.samaanai.com | https://trading-api-*.run.app |
 
 ---
 
-## ✨ Features
+## 📐 Technology Stack
 
-### Core Trading
-- 🤖 **LLM-Powered Analysis**: Google Gemini analyzes technical indicators and recommends trades
-- 📊 **Technical Indicators**: RSI, MACD, Moving Averages, Bollinger Bands, Stochastic, OBV
-- 🛡️ **Risk Management**: Position sizing, stop-loss, daily loss limits, kill switch
-- 📈 **Paper Trading**: Safe testing with Alpaca's paper trading environment
+### Frontend
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| React | 18.x | UI Framework |
+| React Router | 6.x | Client-side Routing |
+| Axios | 1.x | HTTP Client |
+| Create React App | 5.x | Build Tool |
+| Jest | 29.x | Unit Testing |
+| Cypress | 13.x | E2E Testing |
 
-### Dashboard
-- � **Modern React UI**: Real-time portfolio view with dark theme
-- 📋 **Live Positions**: Shows all current holdings with P&L
-- � **Trade History**: See all executed trades from Alpaca
-- 📊 **Technical Indicators**: Live RSI, MACD signals for watchlist
+### Backend
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| Django | 4.x | Web Framework |
+| Django REST Framework | 3.x | REST API |
+| PostgreSQL | 14.x | Database (Cloud SQL) |
+| JWT (Simple JWT) | 5.x | Authentication |
+| Django Allauth | 65.x | Google OAuth 2.0 |
+| Gunicorn | 21.x | WSGI Server |
 
-### Cloud Deployment
-- ☁️ **Cloud Run**: Auto-scaling serverless deployment
-- ⏰ **Cloud Scheduler**: Automated trading every 30 minutes during market hours
-- 🔐 **Google OAuth**: Secure login with authorized emails
-- 🔄 **CI/CD**: GitHub Actions auto-deploy on push to `staging` or `main`
+### Infrastructure
+| Technology | Purpose |
+|------------|---------|
+| Docker | Containerization |
+| Docker Compose | Local Development |
+| Google Cloud Run | Production Runtime |
+| Google Cloud SQL | Managed PostgreSQL |
+| GitHub Actions | CI/CD Pipelines |
+| Nginx | Frontend Static Server |
+
+### External APIs
+| Service | Purpose |
+|---------|---------|
+| Alpaca | Paper Trading & Market Data |
+| Google Gemini | LLM Analysis |
+| NewsAPI | Sentiment Analysis (Optional) |
+| Slack | Trade Notifications (Optional) |
 
 ---
 
-## 📐 System Architecture
+## 📁 Project Structure
+
+```
+Stock Trading/
+├── manage.py                    # Django management script
+├── backend/                     # Django project settings
+│   ├── settings/
+│   │   ├── base.py             # Shared settings
+│   │   ├── development.py      # Local dev (SQLite)
+│   │   └── production.py       # Cloud Run (PostgreSQL)
+│   ├── urls.py                 # Root URL configuration
+│   ├── wsgi.py                 # WSGI entry point
+│   └── asgi.py                 # ASGI entry point
+│
+├── trading_api/                 # Main Django app
+│   ├── models/
+│   │   ├── user.py             # Custom User model
+│   │   └── trade.py            # Trade & PortfolioSnapshot
+│   ├── views/
+│   │   ├── auth.py             # JWT + OAuth endpoints
+│   │   └── api.py              # Trading API endpoints
+│   ├── urls/
+│   │   ├── auth.py             # /auth/* routes
+│   │   └── api.py              # /api/* routes
+│   ├── services/               # Business logic wrapper
+│   └── admin.py                # Django admin config
+│
+├── frontend/                    # React Dashboard (CRA)
+│   ├── src/
+│   │   ├── App.js              # Main component
+│   │   └── services/api.js     # API client with JWT
+│   ├── package.json
+│   └── Dockerfile
+│
+├── src/                         # Trading Logic (Python)
+│   ├── llm/                    # Gemini LLM integration
+│   │   ├── analyst.py          # Trading analysis
+│   │   └── llm_client.py       # Gemini API client
+│   ├── trading/                # Trade execution
+│   │   ├── alpaca_client.py    # Alpaca API wrapper
+│   │   ├── order_manager.py    # Order execution
+│   │   ├── portfolio.py        # Portfolio tracking
+│   │   └── risk_controls.py    # Risk management
+│   └── data/                   # Market data
+│       ├── market_data.py      # Price data
+│       └── technical_indicators.py
+│
+├── scripts/                     # Utility scripts
+│   └── migrate_data.py         # SQLite → PostgreSQL migration
+│
+├── .github/workflows/           # CI/CD
+│   ├── deploy-staging.yml      # Auto-deploy on push to staging
+│   └── deploy-production.yml   # Auto-deploy on push to main
+│
+├── docker-compose.yml           # Local development
+├── Dockerfile                   # Backend container
+├── requirements.txt             # Python dependencies
+└── README.md
+```
+
+---
+
+## 📊 System Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -39,7 +123,7 @@ An AI-powered stock trading agent that uses **Google Gemini** to analyze market 
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                    CLOUD SCHEDULER (Every 30 min)                    │   │
+│  │                    CLOUD SCHEDULER (Every 15 min)                    │   │
 │  │                   POST /api/analyze during market hours              │   │
 │  └──────────────────────────────┬──────────────────────────────────────┘   │
 │                                 │                                           │
@@ -68,54 +152,15 @@ An AI-powered stock trading agent that uses **Google Gemini** to analyze market 
 └──────────────────┘    └──────────────────┘    └──────────────────┘
 ```
 
----
+### Data Flow
 
-## 📁 Project Structure
-
-```
-Stock Trading/
-├── src/                          # Backend Python Application
-│   ├── main.py                   # Entry point, CLI, scheduling
-│   ├── config.py                 # Configuration from environment
-│   ├── dashboard_app.py          # Flask API server
-│   │
-│   ├── data/                     # DATA LAYER
-│   │   ├── market_data.py        # Alpaca + yfinance data client
-│   │   ├── technical_indicators.py   # RSI, MACD, Bollinger, etc.
-│   │   └── data_aggregator.py    # Combines data for LLM
-│   │
-│   ├── llm/                      # LLM BRAIN
-│   │   ├── prompts.py            # System & user prompts
-│   │   ├── llm_client.py         # Gemini API with retry logic
-│   │   └── analyst.py            # Orchestrates analysis
-│   │
-│   ├── trading/                  # EXECUTION ENGINE
-│   │   ├── alpaca_client.py      # Alpaca trading wrapper
-│   │   ├── order_manager.py      # Order execution
-│   │   ├── portfolio.py          # Portfolio tracking
-│   │   └── risk_controls.py      # Position limits, kill switch
-│   │
-│   └── utils/                    # UTILITIES
-│       ├── auth.py               # Google OAuth
-│       ├── logger.py             # Logging configuration
-│       └── slack.py              # Slack notifications
-│
-├── dashboard/                    # Frontend React Application
-│   ├── src/
-│   │   ├── App.jsx               # Main dashboard component
-│   │   ├── api.js                # API client
-│   │   └── index.css             # Styling
-│   ├── Dockerfile                # Frontend container
-│   └── nginx.conf                # Nginx configuration
-│
-├── .github/workflows/            # CI/CD Pipelines
-│   ├── deploy-staging.yml        # Deploy to staging on push
-│   └── deploy-production.yml     # Deploy to prod (manual)
-│
-├── Dockerfile                    # Backend container
-├── .env.example                  # Environment template
-└── README.md                     # This file
-```
+1. **Cloud Scheduler** triggers analysis every 15 minutes during market hours
+2. **Data Layer** fetches market data from Alpaca (with yfinance fallback)
+3. **Technical Indicators** calculate RSI, MACD, Bollinger Bands, etc.
+4. **Gemini LLM** analyzes data and recommends trades with confidence scores
+5. **Risk Controls** validate trades against position limits and daily loss caps
+6. **Order Manager** executes approved trades via Alpaca API
+7. **Dashboard** displays real-time portfolio, positions, and trade history
 
 ---
 
@@ -128,23 +173,24 @@ Stock Trading/
 | `ALPACA_API_KEY` | Alpaca paper trading API key | ✅ |
 | `ALPACA_SECRET_KEY` | Alpaca API secret | ✅ |
 | `GEMINI_API_KEY` | Google Gemini API key | ✅ |
-| `NEWS_API_KEY` | NewsAPI key for sentiment | Optional |
+| `DJANGO_SECRET_KEY` | Django secret key for sessions | ✅ |
 | `GOOGLE_CLIENT_ID` | OAuth client ID | For auth |
 | `GOOGLE_CLIENT_SECRET` | OAuth client secret | For auth |
-| `FLASK_SECRET_KEY` | Session encryption key | For auth |
-| `AUTHORIZED_EMAILS` | Comma-separated allowed emails | For auth |
+| `DB_PASSWORD` | Cloud SQL password | For prod |
+| `NEWS_API_KEY` | NewsAPI key for sentiment | Optional |
+| `SLACK_WEBHOOK_URL` | Slack notifications | Optional |
 
 ### Trading Configuration
 
-Configuration can be set via environment variables (used in Cloud Run):
+Set via environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TRADING_STRATEGY` | balanced | aggressive, balanced, conservative |
-| `ANALYSIS_INTERVAL` | 30 | Minutes between analyses |
+| `ANALYSIS_INTERVAL` | 15 | Minutes between analyses |
 | `MAX_POSITION_PCT` | 0.10 | Max 10% per position |
 | `MAX_DAILY_LOSS_PCT` | 0.03 | Max 3% daily loss |
-| `MIN_CONFIDENCE` | 0.70 | Min 70% confidence to trade |
+| `MIN_CONFIDENCE` | 0.70 | Min 70% LLM confidence |
 | `STOP_LOSS_PCT` | 0.05 | 5% stop loss |
 | `TAKE_PROFIT_PCT` | 0.10 | 10% take profit |
 
@@ -152,97 +198,173 @@ Configuration can be set via environment variables (used in Cloud Run):
 
 ## 🚀 Local Development
 
-### 1. Clone & Setup
+### Prerequisites
+
+- Python 3.10+
+- Node.js 18+
+- Docker & Docker Compose (optional)
+
+### Backend Setup
 
 ```bash
+# Clone and setup
 cd "/Users/krishnayadamakanti/Documents/Stock Trading"
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-```
 
-### 2. Configure Environment
-
-```bash
+# Configure environment
 cp .env.example .env
 # Edit .env with your API keys
+
+# Run migrations
+python manage.py migrate --settings=backend.settings.development
+
+# Start backend (port 8000)
+python manage.py runserver 8000 --settings=backend.settings.development
 ```
 
-### 3. Test Connections
+### Frontend Setup
 
 ```bash
-python src/main.py --test-connection
-```
-
-### 4. Run Backend API
-
-```bash
-python src/dashboard_app.py
-# API runs on http://localhost:5000
-```
-
-### 5. Run Frontend Dashboard
-
-```bash
-cd dashboard
+cd frontend
 npm install
-npm run dev
-# Dashboard runs on http://localhost:5173
+npm start
+# Opens http://localhost:3000
+```
+
+### Docker Compose (Full Stack)
+
+```bash
+docker-compose up --build
+# Backend: http://localhost:8000
+# Frontend: http://localhost:3000
 ```
 
 ---
 
 ## ☁️ Cloud Deployment
 
-### Services
+### CI/CD Pipeline
 
-| Service | URL | Purpose |
-|---------|-----|---------|
-| Backend API | trading-api-staging | Flask API + Trading Agent |
-| Frontend | trading-dashboard-staging | React Dashboard |
-| Scheduler | trading-agent-trigger | Triggers analysis every 30 min |
+| Branch | Action | Environment |
+|--------|--------|-------------|
+| `staging` | Auto-deploy on push | Staging |
+| `main` | Auto-deploy on push | Production |
 
 ### GitHub Secrets Required
 
-Set these in your repository's Settings → Secrets:
+Add these to your repository Settings → Secrets:
 
-- `GCP_SA_KEY` - Service account JSON key
-- `ALPACA_API_KEY`
-- `ALPACA_SECRET_KEY`
+**Shared:**
+- `GCP_SA_KEY` - GCP Service Account JSON (staging)
+- `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`
 - `GEMINI_API_KEY`
-- `NEWS_API_KEY`
-- `GOOGLE_CLIENT_ID`
-- `GOOGLE_CLIENT_SECRET`
-- `FLASK_SECRET_KEY`
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+- `DJANGO_SECRET_KEY`
+- `DB_PASSWORD`
 
-### GitHub Repository Variables
+**Production-specific:**
+- `GCP_SA_KEY_PROD` - GCP Service Account JSON (production)
+- `ALPACA_API_KEY_PROD`, `ALPACA_SECRET_KEY_PROD` (if different)
+- `DJANGO_SECRET_KEY_PROD`
+- `DB_PASSWORD_PROD`
 
-- `AUTHORIZED_EMAILS` - Comma-separated list of allowed Google emails
-
-### Deploy
+### Deploy to Staging
 
 ```bash
-# Staging - auto deploys on push to staging branch
+git checkout staging
+git add .
+git commit -m "Your changes"
 git push origin staging
-
-# Production - auto deploys on push to main branch
-git push origin main
+# GitHub Actions auto-deploys to Cloud Run
 ```
+
+### Deploy to Production
+
+```bash
+git checkout main
+git merge staging
+git push origin main
+# GitHub Actions auto-deploys to Cloud Run
+```
+
+---
+
+## 🔄 Production Migration Checklist
+
+When ready to go to production:
+
+1. **Create Production Cloud SQL Instance** (if not exists)
+   ```bash
+   gcloud sql instances create samaanai-backend-db \
+     --database-version=POSTGRES_14 \
+     --tier=db-f1-micro \
+     --region=us-west1
+   ```
+
+2. **Create Database and User**
+   ```bash
+   gcloud sql databases create stock_trading --instance=samaanai-backend-db
+   gcloud sql users create samaanai_backend --instance=samaanai-backend-db \
+     --password=YOUR_PASSWORD
+   ```
+
+3. **Add Production Secrets to GitHub**
+   - `GCP_SA_KEY_PROD`
+   - `DJANGO_SECRET_KEY_PROD`
+   - `DB_PASSWORD_PROD`
+   - `ALPACA_API_KEY_PROD` (live trading keys if different)
+
+4. **Run Migrations on Production**
+   ```bash
+   # Connect to Cloud Run and run migrations
+   # Or include in Dockerfile startup
+   ```
+
+5. **Migrate Data (if needed)**
+   ```bash
+   # Use Cloud SQL Proxy
+   cloud_sql_proxy -instances=samaanai-prod:us-west1:samaanai-backend-db=tcp:5432
+   
+   export DB_HOST=127.0.0.1
+   export DB_PASSWORD=your_prod_password
+   python scripts/migrate_data.py
+   ```
+
+6. **Push to main branch**
+   ```bash
+   git checkout main
+   git merge staging
+   git push origin main
+   ```
 
 ---
 
 ## 📊 API Endpoints
 
+### Authentication
+
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/health` | GET | Health check |
-| `/api/portfolio` | GET | Current portfolio & positions |
+| `/auth/register` | POST | Register with email/password |
+| `/auth/login` | POST | Login, returns JWT tokens |
+| `/auth/logout` | POST | Blacklist refresh token |
+| `/auth/me` | GET | Get current user info |
+| `/auth/token/refresh` | POST | Refresh access token |
+
+### Trading API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check (no auth) |
+| `/api/portfolio` | GET | Portfolio & positions |
 | `/api/risk` | GET | Risk status & limits |
-| `/api/market` | GET | Market status (open/closed) |
+| `/api/market` | GET | Market open/close status |
 | `/api/watchlist` | GET | Watchlist with prices |
-| `/api/trades` | GET | Recent trade history |
-| `/api/indicators` | GET | Technical indicators |
+| `/api/trades` | GET | Trade history |
 | `/api/config` | GET | Trading configuration |
+| `/api/indicators` | GET | Technical indicators |
 | `/api/analyze` | POST | Trigger trading analysis |
 
 ---
@@ -260,16 +382,6 @@ git push origin main
 
 ---
 
-## 🔄 Retry Logic
-
-The LLM client includes automatic retry for transient errors:
-
-- **Max Retries**: 3 attempts
-- **Backoff**: Exponential (5s, 15s, 45s)
-- **Retryable Errors**: 503, 429, UNAVAILABLE, RESOURCE_EXHAUSTED
-
----
-
 ## 📈 Technical Indicators
 
 | Indicator | Purpose |
@@ -282,35 +394,10 @@ The LLM client includes automatic retry for transient errors:
 | **Stochastic** | Momentum oscillator |
 | **OBV** | Volume-based trend confirmation |
 | **ATR** | Volatility measurement |
-| **Fibonacci** | Support/resistance levels |
-
----
-
-## 💰 API Costs & Limits
-
-### Gemini API (Free Tier)
-
-| Limit | Value |
-|-------|-------|
-| Requests/day | 20 (gemini-2.5-flash) |
-| Tokens/min | 15 |
-
-**Note**: Gemini Pro subscription ($20/mo) is for the consumer app only, NOT the API. For API access, enable billing at [aistudio.google.com](https://aistudio.google.com).
-
-### Alpaca Data
-
-| Plan | Price | Data |
-|------|-------|------|
-| Basic (Free) | $0/mo | IEX real-time + 15-min delayed SIP |
-| Algo Trader Plus | $99/mo | Real-time SIP + Options + Crypto |
-
-**Current Setup**: Uses IEX (free) with yfinance fallback for complete coverage.
 
 ---
 
 ## 📋 Troubleshooting
-
-### Common Issues
 
 | Issue | Cause | Solution |
 |-------|-------|----------|
@@ -318,17 +405,18 @@ The LLM client includes automatic retry for transient errors:
 | "503 UNAVAILABLE" | Gemini overloaded | Retry logic handles automatically |
 | "No historical data" | Alpaca IEX gap | yfinance fallback handles this |
 | No trades executing | LLM confidence < 70% | Normal - wait for better signals |
+| JWT token expired | Access token lifetime | Frontend auto-refreshes tokens |
 
-### Check Logs
+### View Cloud Run Logs
 
 ```bash
-# Cloud Run logs
+# Staging
 gcloud logging read "resource.labels.service_name=trading-api-staging" \
   --project=samaanai-stg-1009-124126 --limit=50
 
-# Scheduler status
-gcloud scheduler jobs describe trading-agent-trigger \
-  --project=samaanai-stg-1009-124126 --location=us-central1
+# Production
+gcloud logging read "resource.labels.service_name=trading-api" \
+  --project=samaanai-prod-1009-124126 --limit=50
 ```
 
 ---
@@ -336,13 +424,9 @@ gcloud scheduler jobs describe trading-agent-trigger \
 ## ⚠️ Important Notes
 
 1. **Paper Trading Only**: Default configuration uses Alpaca paper trading (no real money)
-
 2. **Market Hours**: Agent only trades during market hours (9:30 AM - 4:00 PM ET, Mon-Fri)
-
-3. **Pattern Day Trading**: If using live trading with < $25k, be aware of PDT rules
-
+3. **Pattern Day Trading**: If using live trading with <$25k, be aware of PDT rules
 4. **No Guarantees**: AI trading is experimental. Past performance doesn't predict future results
-
 5. **Your Responsibility**: Always monitor the agent and set appropriate risk limits
 
 ---

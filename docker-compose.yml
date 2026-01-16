@@ -1,0 +1,89 @@
+# Docker Compose for local development
+# LLM Trading Agent - Django + React Stack
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:14
+    container_name: trading-db
+    environment:
+      POSTGRES_DB: stock_trading
+      POSTGRES_USER: trading_user
+      POSTGRES_PASSWORD: trading_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U trading_user -d stock_trading" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Django Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: trading-backend
+    environment:
+      - DJANGO_SETTINGS_MODULE=backend.settings.development
+      - DEBUG=True
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=stock_trading
+      - DB_USER=trading_user
+      - DB_PASSWORD=trading_pass
+      - ALPACA_API_KEY=${ALPACA_API_KEY}
+      - ALPACA_SECRET_KEY=${ALPACA_SECRET_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - DJANGO_SECRET_KEY=dev-secret-key-change-in-production
+    ports:
+      - "8000:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+      - ./backend:/app/backend
+      - ./trading_api:/app/trading_api
+    command: >
+      sh -c "
+        python manage.py migrate --settings=backend.settings.development &&
+        gunicorn --bind :8080 --workers 1 --threads 4 --reload backend.wsgi:application
+      "
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: build
+    container_name: trading-frontend
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+    command: npm start
+    depends_on:
+      - backend
+  # Nginx Reverse Proxy (optional, for production-like setup)
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: trading-nginx
+  #   ports:
+  #     - "80:80"
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/conf.d/default.conf
+  #   depends_on:
+  #     - backend
+  #     - frontend
+
+volumes:
+  postgres_data:

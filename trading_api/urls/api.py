@@ -1,0 +1,30 @@
+"""API URL configuration for trading endpoints."""
+
+from django.urls import path
+from trading_api.views import api
+
+urlpatterns = [
+    # Portfolio and account
+    path('portfolio', api.PortfolioView.as_view(), name='api-portfolio'),
+    
+    # Risk management
+    path('risk', api.RiskView.as_view(), name='api-risk'),
+    
+    # Market status
+    path('market', api.MarketView.as_view(), name='api-market'),
+    
+    # Watchlist
+    path('watchlist', api.WatchlistView.as_view(), name='api-watchlist'),
+    
+    # Trade history
+    path('trades', api.TradesView.as_view(), name='api-trades'),
+    
+    # Trading configuration
+    path('config', api.ConfigView.as_view(), name='api-config'),
+    
+    # Technical indicators
+    path('indicators', api.IndicatorsView.as_view(), name='api-indicators'),
+    
+    # Trigger analysis (for Cloud Scheduler)
+    path('analyze', api.AnalyzeView.as_view(), name='api-analyze'),
+]

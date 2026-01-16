@@ -40,6 +40,15 @@ node_modules/
 dashboard/node_modules/
 dashboard/dist/
 dashboard/.env.production
+frontend/node_modules/
+frontend/build/
+frontend/.env.production
+frontend/.env.local
 
 # Docker
 .docker/
+
+# Django
+db.sqlite3
+staticfiles/
+*.pyc

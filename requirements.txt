@@ -1,7 +1,30 @@
-# Trading API (newer alpaca-py SDK)
+# ==========================================
+# LLM Trading Agent - Python Dependencies
+# ==========================================
+
+# Django Framework & REST
+Django>=4.2,<5.0
+djangorestframework>=3.14.0
+django-cors-headers>=4.3.0
+djangorestframework-simplejwt>=5.3.0
+dj-database-url>=2.1.0
+
+# Authentication (OAuth)
+django-allauth>=0.57.0
+cryptography>=41.0.0
+
+# Database
+psycopg2-binary>=2.9.0  # PostgreSQL adapter
+pg8000>=1.30.0          # Alternative PostgreSQL adapter
+
+# Web Server
+gunicorn>=21.0.0
+whitenoise>=6.6.0
+
+# Trading API (Alpaca)
 alpaca-py>=0.30.0
 
-# LLM (newer google-genai SDK)
+# LLM (Google Gemini)
 google-genai>=1.0.0
 
 # Data & Analysis
@@ -10,27 +33,27 @@ numpy>=1.24.0
 yfinance>=0.2.0
 pandas_ta
 
-# Scheduling
+# Scheduling (for local development)
 schedule>=1.2.0
 
 # Utilities
 python-dotenv>=1.0.0
 loguru>=0.7.0
 pydantic>=2.0.0
-
-# Database
-sqlalchemy>=2.0.0
-
-# HTTP
 requests>=2.31.0
 
-# Web Server
-flask>=3.0.0
-flask-cors>=4.0.0
-flask-dance>=7.0.0
-flask-login>=0.6.0
-
-# User Management
+# Password Hashing
 bcrypt>=4.0.0
+
+# ORM (kept for backward compatibility during migration)
 sqlalchemy>=2.0.0
-pg8000>=1.30.0
+
+# Development tools (optional)
+django-extensions>=3.2.0
+
+# ==========================================
+# Testing (Future)
+# ==========================================
+# pytest>=7.4.0
+# pytest-django>=4.5.0
+# pytest-cov>=4.1.0

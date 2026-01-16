@@ -12,7 +12,7 @@ env:
 
 jobs:
   deploy-backend:
-    name: Deploy Backend API
+    name: Deploy Django Backend
     runs-on: ubuntu-latest
     
     steps:
@@ -49,25 +49,33 @@ jobs:
             --max-instances=2
             --add-cloudsql-instances=samaanai-stg-1009-124126:us-west1:samaanai-backend-staging-db
           env_vars: |
+            DJANGO_SETTINGS_MODULE=backend.settings.production
+            DJANGO_SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}
             ALPACA_API_KEY=${{ secrets.ALPACA_API_KEY }}
             ALPACA_SECRET_KEY=${{ secrets.ALPACA_SECRET_KEY }}
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
             NEWS_API_KEY=${{ secrets.NEWS_API_KEY }}
             GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
             GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
-            FLASK_SECRET_KEY=${{ secrets.FLASK_SECRET_KEY }}
             AUTHORIZED_EMAILS=${{ vars.AUTHORIZED_EMAILS }}
             DB_USER=samaanai_backend
             DB_PASSWORD=${{ secrets.DB_PASSWORD }}
             DB_NAME=stock_trading
             INSTANCE_CONNECTION_NAME=samaanai-stg-1009-124126:us-west1:samaanai-backend-staging-db
+            ALLOWED_HOSTS=stg.trading.samaanai.com,trading-api-staging-hdp6ioqupa-uc.a.run.app
+      
+      - name: Run Django Migrations
+        run: |
+          BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE --region=$GCP_REGION --format='value(status.url)')
+          echo "Backend URL: $BACKEND_URL"
+          # Note: Migrations should be run as part of container startup or via a separate job
       
       - name: Show Backend URL
         run: |
           echo "✅ Backend deployed to: $(gcloud run services describe $BACKEND_SERVICE --region=$GCP_REGION --format='value(status.url)')"
 
   deploy-frontend:
-    name: Deploy Frontend Dashboard
+    name: Deploy React Frontend
     runs-on: ubuntu-latest
     needs: deploy-backend
     
@@ -93,12 +101,12 @@ jobs:
           echo "url=$BACKEND_URL" >> $GITHUB_OUTPUT
       
       - name: Update API URL in Frontend
-        working-directory: dashboard
+        working-directory: frontend
         run: |
-          echo "VITE_API_URL=${{ steps.backend-url.outputs.url }}" > .env.production
+          echo "REACT_APP_API_URL=${{ steps.backend-url.outputs.url }}" > .env.production
       
       - name: Build and Push Docker image
-        working-directory: dashboard
+        working-directory: frontend
         run: |
           docker build -t gcr.io/$GCP_PROJECT/$FRONTEND_SERVICE:${{ github.sha }} .
           docker push gcr.io/$GCP_PROJECT/$FRONTEND_SERVICE:${{ github.sha }}
