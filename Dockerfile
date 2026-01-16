@@ -13,7 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy requirements first for caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && \
+    echo "✅ pip install completed successfully"
 
 # Copy source code
 COPY src/ ./src/
@@ -21,8 +22,10 @@ COPY backend/ ./backend/
 COPY trading_api/ ./trading_api/
 COPY manage.py .
 
-# Collect static files
-RUN python manage.py collectstatic --noinput --settings=backend.settings.production || true
+# Collect static files (with verbose output)
+RUN echo "🔄 Running collectstatic..." && \
+    python manage.py collectstatic --noinput --settings=backend.settings.production && \
+    echo "✅ collectstatic completed successfully"
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
