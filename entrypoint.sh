@@ -7,7 +7,7 @@ echo "🔧 DJANGO_SETTINGS_MODULE: $DJANGO_SETTINGS_MODULE"
 # Run database migrations with error handling for partial migration state
 echo "🔄 Running database migrations..."
 
-# Fix: Add missing password column to users table if it doesn't exist
+# Fix: Add missing columns to users table if they don't exist
 # This handles the case where the table was created with Flask/SQLAlchemy before Django migrations
 echo "   Checking and fixing users table schema..."
 python -c "
@@ -17,6 +17,20 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', os.environ.get('DJANGO_SETTINGS_
 django.setup()
 
 from django.db import connection
+
+# All columns required by Django's AbstractBaseUser and our custom User model
+REQUIRED_COLUMNS = {
+    'password': 'VARCHAR(128) DEFAULT \'\'',
+    'is_superuser': 'BOOLEAN DEFAULT FALSE',
+    'is_staff': 'BOOLEAN DEFAULT FALSE',
+    'is_active': 'BOOLEAN DEFAULT TRUE',
+    'email_verified': 'BOOLEAN DEFAULT FALSE',
+    'name': 'VARCHAR(255) DEFAULT \'\'',
+    'picture_url': 'VARCHAR(500) DEFAULT \'\'',
+    'auth_provider': 'VARCHAR(50) DEFAULT \\'local\\'',
+    'created_at': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
+    'last_login': 'TIMESTAMP NULL',
+}
 
 try:
     with connection.cursor() as cursor:
@@ -30,21 +44,22 @@ try:
         table_exists = cursor.fetchone()[0]
         
         if table_exists:
-            # Check if password column exists
+            # Get existing columns
             cursor.execute(\"\"\"
-                SELECT EXISTS (
-                    SELECT FROM information_schema.columns 
-                    WHERE table_name = 'users' AND column_name = 'password'
-                );
+                SELECT column_name FROM information_schema.columns 
+                WHERE table_name = 'users';
             \"\"\")
-            password_exists = cursor.fetchone()[0]
+            existing_columns = {row[0] for row in cursor.fetchall()}
+            print(f'   Existing columns: {existing_columns}')
             
-            if not password_exists:
-                print('   Adding missing password column to users table...')
-                cursor.execute('ALTER TABLE users ADD COLUMN password VARCHAR(128) DEFAULT \'\'')
-                print('   ✅ Password column added!')
-            else:
-                print('   Password column already exists.')
+            # Add missing columns
+            for col_name, col_def in REQUIRED_COLUMNS.items():
+                if col_name not in existing_columns:
+                    print(f'   Adding missing column: {col_name}')
+                    cursor.execute(f'ALTER TABLE users ADD COLUMN {col_name} {col_def}')
+                    print(f'   ✅ Column {col_name} added!')
+            
+            print('   Schema check complete.')
         else:
             print('   Users table does not exist yet, will be created by migrations.')
 except Exception as e:
