@@ -91,25 +91,36 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
         """
         Save the newly signed up social user.
         """
-        user = super().save_user(request, sociallogin, form)
-        
-        # Update user with Google profile data
-        extra_data = sociallogin.account.extra_data
-        
-        if not user.name and extra_data.get('name'):
-            user.name = extra_data.get('name', '')
-        
-        if not user.picture_url and extra_data.get('picture'):
-            user.picture_url = extra_data.get('picture', '')
-        
-        user.auth_provider = 'google'
-        user.email_verified = True
-        
         try:
-            user.save()
-            logger.info(f"Created new user from Google OAuth: {user.email}")
+            user = super().save_user(request, sociallogin, form)
+            
+            # Update user with Google profile data
+            extra_data = sociallogin.account.extra_data
+            
+            if not user.name and extra_data.get('name'):
+                user.name = extra_data.get('name', '')
+            
+            if not user.picture_url and extra_data.get('picture'):
+                user.picture_url = extra_data.get('picture', '')
+            
+            user.auth_provider = 'google'
+            user.email_verified = True
+            
+            try:
+                user.save()
+                logger.info(f"Created new user from Google OAuth: {user.email}")
+            except Exception as e:
+                logger.error(f"Error creating user from Google OAuth {user.email}: {e}")
+                raise
+            
+            return user
+            
         except Exception as e:
-            logger.error(f"Error creating user from Google OAuth {user.email}: {e}")
+            # Catch errors from super().save_user() or anywhere else
+            email = 'unknown'
+            if sociallogin and sociallogin.user:
+                email = sociallogin.user.email
+            logger.error(f"CRITICAL: Google OAuth save_user failed for {email}: {str(e)}")
             raise
         
-        return user
+

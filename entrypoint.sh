@@ -26,7 +26,7 @@ REQUIRED_COLUMNS = {
     'is_active': 'BOOLEAN DEFAULT TRUE',
     'email_verified': 'BOOLEAN DEFAULT FALSE',
     'name': 'VARCHAR(255) DEFAULT \'\'',
-    'picture_url': 'VARCHAR(500) DEFAULT \'\'',
+    'picture_url': 'VARCHAR(2048) DEFAULT \'\'',
     'auth_provider': 'VARCHAR(50) DEFAULT \\'local\\'',
     'created_at': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
     'last_login': 'TIMESTAMP NULL',
@@ -69,6 +69,19 @@ except Exception as e:
 # First, try to migrate the sites framework (needed for allauth)
 echo "   Migrating sites framework..."
 python manage.py migrate sites --noinput 2>&1 || echo "   Sites migration may already be applied"
+echo "   Ensuring default site exists..."
+python -c "
+import os
+import django
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', os.environ.get('DJANGO_SETTINGS_MODULE', 'backend.settings.production'))
+django.setup()
+from django.contrib.sites.models import Site
+if not Site.objects.filter(id=1).exists():
+    Site.objects.create(id=1, domain='example.com', name='example.com')
+    print('   Created default site (id=1)')
+else:
+    print('   Default site exists')
+"
 
 # Then migrate contenttypes
 echo "   Migrating contenttypes..."
