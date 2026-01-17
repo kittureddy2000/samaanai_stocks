@@ -63,6 +63,7 @@ jobs:
             DB_NAME=stock_trading
             INSTANCE_CONNECTION_NAME=samaanai-stg-1009-124126:us-west1:samaanai-backend-staging-db
             ALLOWED_HOSTS=stg.trading.samaanai.com,trading-api-staging-hdp6ioqupa-uc.a.run.app
+            FRONTEND_URL=https://trading-dashboard-staging-hdp6ioqupa-uc.a.run.app
       
       - name: Run Django Migrations
         run: |

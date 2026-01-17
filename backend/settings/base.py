@@ -176,6 +176,21 @@ ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_USERNAME_REQUIRED = False
 ACCOUNT_AUTHENTICATION_METHOD = 'email'
 ACCOUNT_EMAIL_VERIFICATION = 'optional'
+ACCOUNT_DEFAULT_HTTP_PROTOCOL = 'https'
+
+# OAuth redirect URLs - Frontend dashboard URL (configured via env var for different environments)
+LOGIN_REDIRECT_URL = os.environ.get('LOGIN_REDIRECT_URL', 'http://localhost:3000/auth/callback')
+LOGOUT_REDIRECT_URL = os.environ.get('LOGOUT_REDIRECT_URL', 'http://localhost:3000/')
+
+# Social Account Settings
+SOCIALACCOUNT_STORE_TOKENS = True
+SOCIALACCOUNT_AUTO_SIGNUP = True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
+
+# Custom adapters for OAuth handling with JWT tokens
+ACCOUNT_ADAPTER = 'trading_api.adapters.CustomAccountAdapter'
+SOCIALACCOUNT_ADAPTER = 'trading_api.adapters.CustomSocialAccountAdapter'
 
 # Google OAuth provider settings
 SOCIALACCOUNT_PROVIDERS = {

@@ -14,6 +14,7 @@ import {
     logout,
     getGoogleLoginUrl,
     hasToken,
+    setTokens,
 } from './services/api';
 import './App.css';
 
@@ -39,6 +40,42 @@ const getSignalClass = (signal) => {
     if (s.includes('SELL') || s.includes('OVERBOUGHT') || s.includes('BEARISH')) return 'negative';
     return '';
 };
+
+// OAuth Callback Component - handles redirect from Google OAuth
+function OAuthCallback({ onAuthSuccess }) {
+    useEffect(() => {
+        // Extract tokens and user info from URL params
+        const params = new URLSearchParams(window.location.search);
+        const access = params.get('access');
+        const refresh = params.get('refresh');
+        const email = params.get('email');
+        const name = params.get('name');
+        const picture = params.get('picture');
+
+        if (access && refresh) {
+            // Store tokens
+            setTokens({ access, refresh });
+
+            // Notify parent of successful auth
+            onAuthSuccess({
+                authenticated: true,
+                email: email || '',
+                name: name || email?.split('@')[0] || '',
+                picture: picture || '',
+            });
+        } else {
+            // If no tokens, redirect to login
+            console.error('OAuth callback missing tokens');
+            window.location.href = '/';
+        }
+    }, [onAuthSuccess]);
+
+    return (
+        <div className="dashboard">
+            <div className="loading">Completing sign in...</div>
+        </div>
+    );
+}
 
 // Auth Page Component
 function AuthPage({ onAuthSuccess }) {
@@ -565,6 +602,16 @@ function App() {
                         <Dashboard user={user} onLogout={() => setUser(null)} />
                     ) : (
                         <AuthPage onAuthSuccess={(userData) => setUser(userData)} />
+                    )
+                }
+            />
+            <Route
+                path="/auth/callback"
+                element={
+                    user ? (
+                        <Navigate to="/" replace />
+                    ) : (
+                        <OAuthCallback onAuthSuccess={(userData) => setUser(userData)} />
                     )
                 }
             />

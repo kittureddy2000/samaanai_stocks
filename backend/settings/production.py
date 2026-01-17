@@ -113,5 +113,12 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 LOGGING['root']['level'] = 'INFO'
 LOGGING['loggers']['django']['level'] = 'WARNING'
 
+# OAuth Redirect URLs for production
+# These are overridden from base.py for production environments
+# The environment variable takes priority, with a sensible default for staging
+FRONTEND_URL = os.environ.get('FRONTEND_URL', 'https://trading-dashboard-staging-hdp6ioqupa-uc.a.run.app')
+LOGIN_REDIRECT_URL = os.environ.get('LOGIN_REDIRECT_URL', f'{FRONTEND_URL}/auth/callback')
+LOGOUT_REDIRECT_URL = os.environ.get('LOGOUT_REDIRECT_URL', f'{FRONTEND_URL}/')
+
 print("🚀 Running with PRODUCTION settings")
 
