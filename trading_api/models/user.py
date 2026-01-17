@@ -56,7 +56,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     
     email = models.EmailField(unique=True, db_index=True)
     name = models.CharField(max_length=255, blank=True)
-    picture_url = models.URLField(max_length=500, blank=True)
+    picture_url = models.URLField(max_length=2048, blank=True)
     
     # Authentication provider
     auth_provider = models.CharField(

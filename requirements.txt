@@ -12,6 +12,7 @@ dj-database-url>=2.1.0
 # Authentication (OAuth)
 django-allauth>=0.57.0
 cryptography>=41.0.0
+google-auth>=2.0.0
 
 # Database
 psycopg2-binary>=2.9.0  # PostgreSQL adapter

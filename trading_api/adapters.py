@@ -104,8 +104,12 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
         
         user.auth_provider = 'google'
         user.email_verified = True
-        user.save()
         
-        logger.info(f"Created new user from Google OAuth: {user.email}")
+        try:
+            user.save()
+            logger.info(f"Created new user from Google OAuth: {user.email}")
+        except Exception as e:
+            logger.error(f"Error creating user from Google OAuth {user.email}: {e}")
+            raise
         
         return user
