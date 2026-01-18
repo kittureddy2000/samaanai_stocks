@@ -83,6 +83,9 @@ else:
     print('   Default site exists')
 "
 
+echo "🔧 Running Google Auth configuration check..."
+python scripts/fix_google_auth.py || echo "⚠️  Failed to run auth fix script"
+
 # Then migrate contenttypes
 echo "   Migrating contenttypes..."
 python manage.py migrate contenttypes --noinput 2>&1 || echo "   Contenttypes migration may already be applied"
