@@ -17,12 +17,23 @@ LOGS_DIR.mkdir(exist_ok=True)
 
 class AlpacaConfig(BaseModel):
     """Alpaca API configuration."""
-    api_key: str = os.getenv("ALPACA_API_KEY", "")
-    secret_key: str = os.getenv("ALPACA_SECRET_KEY", "")
+    # Use private fields with runtime getters
+    _api_key: str = ""
+    _secret_key: str = ""
     # Paper trading endpoint
     base_url: str = "https://paper-api.alpaca.markets"
     # Data endpoint
     data_url: str = "https://data.alpaca.markets"
+    
+    @property
+    def api_key(self) -> str:
+        """Get API key from environment at runtime."""
+        return os.environ.get("ALPACA_API_KEY", self._api_key) or os.getenv("ALPACA_API_KEY", "")
+    
+    @property
+    def secret_key(self) -> str:
+        """Get secret key from environment at runtime."""
+        return os.environ.get("ALPACA_SECRET_KEY", self._secret_key) or os.getenv("ALPACA_SECRET_KEY", "")
 
 
 class GeminiConfig(BaseModel):
