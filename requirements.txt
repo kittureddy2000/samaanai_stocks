@@ -32,8 +32,7 @@ google-genai>=1.0.0
 pandas>=2.0.0
 numpy>=1.24.0
 yfinance>=0.2.0
-# pandas-ta removed - not available on PyPI, using yfinance for indicators
-pandas-ta>=0.3.0
+# pandas-ta causes build issues, using native pandas implementations
 
 # Scheduling (for local development)
 schedule>=1.2.0
