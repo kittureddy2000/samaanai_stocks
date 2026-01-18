@@ -42,11 +42,19 @@ class PortfolioView(APIView):
     
     def get(self, request):
         try:
+            logger.info(f"PortfolioView: Fetching portfolio for user {request.user.email}")
             trading_client = get_trading_client()
+            
+            logger.info("PortfolioView: Getting account...")
             account = trading_client.get_account()
+            logger.info(f"PortfolioView: Account result: {account}")
+            
+            logger.info("PortfolioView: Getting positions...")
             positions = trading_client.get_positions()
+            logger.info(f"PortfolioView: Positions count: {len(positions) if positions else 0}")
             
             if not account:
+                logger.error("PortfolioView: Failed to get account - returned None")
                 return Response({'error': 'Failed to get account'}, status=500)
             
             # Calculate daily change
@@ -71,7 +79,7 @@ class PortfolioView(APIView):
                 'positions_count': len(positions),
             })
         except Exception as e:
-            logger.error(f"Portfolio error: {e}")
+            logger.error(f"Portfolio error: {e}", exc_info=True)
             return Response({'error': str(e)}, status=500)
 
 

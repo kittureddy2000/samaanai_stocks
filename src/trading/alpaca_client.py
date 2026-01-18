@@ -22,9 +22,16 @@ class AlpacaTradingClient:
     
     def __init__(self):
         """Initialize the Alpaca trading client."""
+        api_key = config.alpaca.api_key
+        secret_key = config.alpaca.secret_key
+        
+        # Log key presence (not the actual keys for security)
+        logger.info(f"AlpacaTradingClient: API Key present: {bool(api_key)}, length: {len(api_key) if api_key else 0}")
+        logger.info(f"AlpacaTradingClient: Secret Key present: {bool(secret_key)}, length: {len(secret_key) if secret_key else 0}")
+        
         self.client = TradingClient(
-            api_key=config.alpaca.api_key,
-            secret_key=config.alpaca.secret_key,
+            api_key=api_key,
+            secret_key=secret_key,
             paper=True  # Always use paper trading
         )
     
