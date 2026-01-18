@@ -50,7 +50,7 @@ if INSTANCE_CONNECTION_NAME:
         'default': {
             'ENGINE': 'django.db.backends.postgresql',
             'NAME': os.environ.get('DB_NAME', 'stock_trading'),
-            'USER': os.environ.get('DB_USER', 'samaanai_stocks'),
+            'USER': os.environ.get('DB_USER', 'samaanai_backend'),
             'PASSWORD': os.environ.get('DB_PASSWORD', ''),
             'HOST': f'/cloudsql/{INSTANCE_CONNECTION_NAME}',
             'PORT': '',
@@ -62,7 +62,7 @@ elif DB_HOST:
         'default': {
             'ENGINE': 'django.db.backends.postgresql',
             'NAME': os.environ.get('DB_NAME', 'stock_trading'),
-            'USER': os.environ.get('DB_USER', 'samaanai_stocks'),
+            'USER': os.environ.get('DB_USER', 'samaanai_backend'),
             'PASSWORD': os.environ.get('DB_PASSWORD', ''),
             'HOST': DB_HOST,
             'PORT': os.environ.get('DB_PORT', '5432'),
