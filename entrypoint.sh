@@ -83,8 +83,7 @@ else:
     print('   Default site exists')
 "
 
-echo "🔧 Running Google Auth configuration check..."
-python scripts/fix_google_auth.py || echo "⚠️  Failed to run auth fix script"
+# Note: Google Auth configuration will run after all migrations
 
 # Then migrate contenttypes
 echo "   Migrating contenttypes..."
@@ -116,6 +115,10 @@ echo "   Running remaining migrations..."
 python manage.py migrate --noinput 2>&1 || echo "   Some migrations may have failed, but continuing..."
 
 echo "✅ Migrations complete (or already applied)!"
+
+# Run Google Auth configuration after migrations
+echo "🔧 Running Google Auth configuration check..."
+python scripts/fix_google_auth.py 2>&1 || echo "⚠️  Auth config may need manual setup"
 
 # Collect static files
 echo "🔄 Collecting static files..."
