@@ -16,7 +16,17 @@ from alpaca.trading.requests import (
 from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus
 
 import sys
-sys.path.append(str(__file__).rsplit("/", 3)[0])
+import os
+
+# Add the project root and src to path
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+_SRC_DIR = os.path.join(_PROJECT_ROOT, 'src')
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
+
 from config import config
 from src.trading.broker_base import BaseBroker, AccountInfo, Position, Order
 
