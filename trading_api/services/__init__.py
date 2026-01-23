@@ -20,8 +20,34 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 
+# Cached broker instance
+_broker_instance = None
+
+
+def get_broker():
+    """Get the configured broker instance (Alpaca or IBKR).
+    
+    Uses the BROKER_TYPE environment variable to determine which broker to use.
+    Returns a cached instance to avoid reconnection overhead.
+    """
+    global _broker_instance
+    if _broker_instance is None:
+        from src.trading.broker_factory import get_broker as _get_broker
+        _broker_instance = _get_broker()
+    return _broker_instance
+
+
+def get_broker_name():
+    """Get the name of the configured broker."""
+    from src.trading.broker_factory import get_broker_name as _get_name
+    return _get_name()
+
+
 def get_alpaca_client():
-    """Lazily import AlpacaTradingClient."""
+    """Lazily import AlpacaTradingClient.
+    
+    DEPRECATED: Use get_broker() for multi-broker support.
+    """
     from src.trading.alpaca_client import AlpacaTradingClient
     return AlpacaTradingClient
 
@@ -81,6 +107,8 @@ def get_slack():
 
 
 __all__ = [
+    'get_broker',
+    'get_broker_name',
     'get_alpaca_client',
     'get_risk_manager',
     'get_order_manager',
@@ -92,3 +120,4 @@ __all__ = [
     'get_llm_client',
     'get_slack',
 ]
+

@@ -15,10 +15,79 @@ logger = logging.getLogger(__name__)
 
 # Lazy import functions to avoid import errors during collectstatic
 def get_trading_client():
-    """Get Alpaca trading client."""
-    from trading_api.services import get_alpaca_client
-    AlpacaTradingClient = get_alpaca_client()
-    return AlpacaTradingClient()
+    """Get trading client using broker factory (supports Alpaca and IBKR)."""
+    from trading_api.services import get_broker
+    return BrokerClientWrapper(get_broker())
+
+
+def get_broker_info():
+    """Get info about the current broker."""
+    from trading_api.services import get_broker_name
+    return get_broker_name()
+
+
+class BrokerClientWrapper:
+    """Wrapper to provide backward-compatible dict interface from broker dataclasses."""
+    
+    def __init__(self, broker):
+        self.broker = broker
+    
+    def get_account(self):
+        """Get account as dictionary."""
+        account = self.broker.get_account()
+        if not account:
+            return None
+        return {
+            'id': account.id,
+            'cash': account.cash,
+            'buying_power': account.buying_power,
+            'portfolio_value': account.portfolio_value,
+            'equity': account.equity,
+            'last_equity': account.last_equity,
+        }
+    
+    def get_positions(self):
+        """Get positions as list of dictionaries."""
+        positions = self.broker.get_positions()
+        return [
+            {
+                'symbol': pos.symbol,
+                'qty': pos.qty,
+                'avg_entry_price': pos.avg_entry_price,
+                'current_price': pos.current_price,
+                'market_value': pos.market_value,
+                'unrealized_pl': pos.unrealized_pl,
+                'unrealized_plpc': pos.unrealized_plpc,
+            }
+            for pos in positions
+        ]
+    
+    def get_orders_history(self, limit=50):
+        """Get order history as list of dictionaries."""
+        orders = self.broker.get_orders_history(limit)
+        return [
+            {
+                'id': order.id,
+                'symbol': order.symbol,
+                'side': order.side,
+                'qty': order.qty,
+                'type': order.order_type,
+                'status': order.status,
+                'limit_price': order.limit_price,
+                'filled_qty': order.filled_qty,
+                'filled_avg_price': order.filled_price,
+                'created_at': str(order.created_at) if order.created_at else None,
+            }
+            for order in orders
+        ]
+    
+    def is_market_open(self):
+        """Check if market is open."""
+        return self.broker.is_market_open()
+    
+    def get_market_hours(self):
+        """Get market hours."""
+        return self.broker.get_market_hours()
 
 
 def get_risk_manager():
@@ -190,6 +259,7 @@ class ConfigView(APIView):
     def get(self, request):
         trading_config = settings.TRADING_CONFIG
         return Response({
+            'broker': get_broker_info(),
             'watchlist': trading_config['WATCHLIST'],
             'analysis_interval': trading_config['ANALYSIS_INTERVAL_MINUTES'],
             'max_position_pct': trading_config['MAX_POSITION_PCT'] * 100,
