@@ -467,25 +467,53 @@ sudo systemctl status ibgateway
 ```
 
 ### Pending Setup (After Getting IBKR Password)
+### Updating IBKR Credentials
 
-1. **Add IBKR password to VM config:**
-   ```bash
-   gcloud compute ssh ibkr-gateway --zone=us-west1-b
-   nano ~/ibc/config.ini  # Edit IbPassword line
-   sudo systemctl start ibgateway
-   ```
+```bash
+# SSH into the VM
+gcloud compute ssh ibkr-gateway --zone=us-west1-b
 
-2. **Create VPC Connector** (for Cloud Run → VM access):
-   ```bash
-   gcloud compute networks vpc-access connectors create ibkr-connector \
-       --region=us-west1 \
-       --network=default \
-       --range=10.8.0.0/28
-   ```
+# Edit credentials in both locations:
+nano ~/ibc/config.ini
+sudo nano /opt/ibc/config.ini
 
-3. **Update Cloud Run** with VPC connector and IBKR env vars
+# Update these lines:
+# IbLoginId=YOUR_USERNAME
+# IbPassword=YOUR_PASSWORD
+# TradingMode=paper  (or "live")
 
-4. **Test connection** from Cloud Run to IB Gateway
+# Restart the service
+sudo systemctl restart ibgateway
+
+# Check status
+sudo systemctl status ibgateway
+sudo journalctl -u ibgateway -n 50
+```
+
+### IB Gateway Requirements
+
+| Component | Requirement |
+|-----------|-------------|
+| **Java** | OpenJDK 17+ |
+| **Display** | Xvfb (virtual framebuffer) |
+| **Memory** | 768MB+ recommended |
+| **IBC** | v3.23.0 for automated login |
+
+### Troubleshooting
+
+```bash
+# Check if services are running
+sudo systemctl status xvfb ibgateway
+
+# View logs
+sudo journalctl -u ibgateway -f
+
+# Check if port is listening
+ss -tlnp | grep 4002
+
+# Restart everything
+sudo systemctl restart xvfb ibgateway
+```
 
 ---
 
