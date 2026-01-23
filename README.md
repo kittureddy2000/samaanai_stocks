@@ -1,6 +1,6 @@
 # LLM Trading Agent
 
-An AI-powered stock trading agent that uses **Google Gemini** to analyze market data and make automated trading decisions on Alpaca's paper trading platform.
+An AI-powered stock trading agent that uses **Google Gemini** to analyze market data and make automated trading decisions. Supports **Alpaca** (paper trading) and **Interactive Brokers** (live/paper).
 
 ## 🚀 Live Demo
 
@@ -40,13 +40,15 @@ An AI-powered stock trading agent that uses **Google Gemini** to analyze market 
 | Docker Compose | Local Development |
 | Google Cloud Run | Production Runtime |
 | Google Cloud SQL | Managed PostgreSQL |
+| Google Compute Engine | IB Gateway VM (~$3/month) |
 | GitHub Actions | CI/CD Pipelines |
 | Nginx | Frontend Static Server |
 
-### External APIs
+### External APIs & Brokers
 | Service | Purpose |
 |---------|---------|
-| Alpaca | Paper Trading & Market Data |
+| **Alpaca** | Paper Trading & Market Data (Default) |
+| **Interactive Brokers** | Live/Paper Trading (Optional) |
 | Google Gemini | LLM Analysis |
 | NewsAPI | Sentiment Analysis (Optional) |
 | Slack | Trade Notifications (Optional) |
@@ -418,6 +420,72 @@ gcloud logging read "resource.labels.service_name=trading-api-staging" \
 gcloud logging read "resource.labels.service_name=trading-api" \
   --project=samaanai-prod-1009-124126 --limit=50
 ```
+
+---
+
+## 🏦 Interactive Brokers Integration
+
+The system supports switching between Alpaca and Interactive Brokers via environment variable.
+
+### Broker Selection
+
+```bash
+# Use Alpaca (default)
+export BROKER_TYPE=alpaca
+
+# Use Interactive Brokers
+export BROKER_TYPE=ibkr
+export IBKR_GATEWAY_HOST=10.138.0.2    # VM internal IP
+export IBKR_GATEWAY_PORT=4002          # 4002=paper, 4001=live
+export IBKR_CLIENT_ID=1
+```
+
+### IB Gateway VM (us-west1-b)
+
+| Component | Details |
+|-----------|---------|
+| **VM Name** | `ibkr-gateway` |
+| **Machine Type** | e2-micro (Spot) |
+| **Monthly Cost** | ~$3.40 |
+| **Internal IP** | `10.138.0.2` |
+| **Ports** | 4001 (live), 4002 (paper) |
+
+### VM Setup Commands
+
+```bash
+# SSH into IB Gateway VM
+gcloud compute ssh ibkr-gateway --zone=us-west1-b
+
+# View logs
+sudo journalctl -u ibgateway -f
+
+# Restart gateway
+sudo systemctl restart ibgateway
+
+# Check status
+sudo systemctl status ibgateway
+```
+
+### Pending Setup (After Getting IBKR Password)
+
+1. **Add IBKR password to VM config:**
+   ```bash
+   gcloud compute ssh ibkr-gateway --zone=us-west1-b
+   nano ~/ibc/config.ini  # Edit IbPassword line
+   sudo systemctl start ibgateway
+   ```
+
+2. **Create VPC Connector** (for Cloud Run → VM access):
+   ```bash
+   gcloud compute networks vpc-access connectors create ibkr-connector \
+       --region=us-west1 \
+       --network=default \
+       --range=10.8.0.0/28
+   ```
+
+3. **Update Cloud Run** with VPC connector and IBKR env vars
+
+4. **Test connection** from Cloud Run to IB Gateway
 
 ---
 
