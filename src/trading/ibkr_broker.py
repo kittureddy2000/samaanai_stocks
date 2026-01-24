@@ -8,6 +8,14 @@ from typing import Optional, List
 from datetime import datetime, timezone
 from loguru import logger
 import os
+import asyncio
+
+# Fix for ib_insync which requires an event loop at import time
+# This is needed when running in Django's threaded environment
+try:
+    asyncio.get_event_loop()
+except RuntimeError:
+    asyncio.set_event_loop(asyncio.new_event_loop())
 
 try:
     from ib_insync import IB, Stock, MarketOrder, LimitOrder
@@ -15,6 +23,7 @@ try:
 except ImportError:
     IB_INSYNC_AVAILABLE = False
     logger.warning("ib_insync not installed. IBKR trading will not be available.")
+
 
 from src.trading.broker_base import BaseBroker, AccountInfo, Position, Order
 
