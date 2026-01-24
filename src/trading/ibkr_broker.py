@@ -10,19 +10,8 @@ from loguru import logger
 import os
 import asyncio
 
-# Fix for ib_insync which requires an event loop at import time
-# This is needed when running in Django's threaded environment
-try:
-    asyncio.get_event_loop()
-except RuntimeError:
-    asyncio.set_event_loop(asyncio.new_event_loop())
+# Imports moved to __init__ to handle asyncio loop creation in threads
 
-try:
-    from ib_insync import IB, Stock, MarketOrder, LimitOrder
-    IB_INSYNC_AVAILABLE = True
-except ImportError:
-    IB_INSYNC_AVAILABLE = False
-    logger.warning("ib_insync not installed. IBKR trading will not be available.")
 
 
 from src.trading.broker_base import BaseBroker, AccountInfo, Position, Order
@@ -36,10 +25,25 @@ class IBKRBroker(BaseBroker):
     
     def __init__(self):
         """Initialize the IBKR broker."""
-        if not IB_INSYNC_AVAILABLE:
-            raise ImportError("ib_insync is required for IBKR trading. Install with: pip install ib_insync")
+        # Late import to ensure event loop exists in this thread
+        try:
+            import asyncio
+            try:
+                asyncio.get_event_loop()
+            except RuntimeError:
+                asyncio.set_event_loop(asyncio.new_event_loop())
+                
+            import ib_insync
+            self.ib_module = ib_insync
+            self.IB = ib_insync.IB
+            self.Stock = ib_insync.Stock
+            self.MarketOrder = ib_insync.MarketOrder
+            self.LimitOrder = ib_insync.LimitOrder
+        except ImportError:
+            logger.warning("ib_insync not installed. IBKR trading will not be available.")
+            raise ImportError("ib_insync is required for IBKR trading")
         
-        self.ib = IB()
+        self.ib = self.IB()
         self.host = os.environ.get('IBKR_GATEWAY_HOST', '127.0.0.1')
         self.port = int(os.environ.get('IBKR_GATEWAY_PORT', '4002'))  # 4001=live, 4002=paper
         self.client_id = int(os.environ.get('IBKR_CLIENT_ID', '1'))
@@ -173,11 +177,11 @@ class IBKRBroker(BaseBroker):
             if not self._connected:
                 self.connect()
             
-            contract = Stock(symbol, 'SMART', 'USD')
+            contract = self.Stock(symbol, 'SMART', 'USD')
             self.ib.qualifyContracts(contract)
             
             action = 'BUY' if side.lower() == 'buy' else 'SELL'
-            order = MarketOrder(action, qty)
+            order = self.MarketOrder(action, qty)
             
             trade = self.ib.placeOrder(contract, order)
             self.ib.sleep(1)  # Wait for order to be processed
@@ -205,11 +209,11 @@ class IBKRBroker(BaseBroker):
             if not self._connected:
                 self.connect()
             
-            contract = Stock(symbol, 'SMART', 'USD')
+            contract = self.Stock(symbol, 'SMART', 'USD')
             self.ib.qualifyContracts(contract)
             
             action = 'BUY' if side.lower() == 'buy' else 'SELL'
-            order = LimitOrder(action, qty, limit_price)
+            order = self.LimitOrder(action, qty, limit_price)
             
             trade = self.ib.placeOrder(contract, order)
             self.ib.sleep(1)
@@ -349,7 +353,7 @@ class IBKRBroker(BaseBroker):
     def _get_current_price(self, symbol: str) -> float:
         """Get current price for a symbol using IBKR market data."""
         try:
-            contract = Stock(symbol, 'SMART', 'USD')
+            contract = self.Stock(symbol, 'SMART', 'USD')
             self.ib.qualifyContracts(contract)
             ticker = self.ib.reqMktData(contract)
             self.ib.sleep(2)  # Wait for data
