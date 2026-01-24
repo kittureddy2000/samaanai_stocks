@@ -30,7 +30,6 @@ def get_broker():
     Uses the BROKER_TYPE environment variable to determine which broker to use.
     Returns a cached instance to avoid reconnection overhead.
     """
-    """
     global _broker_instance
     if _broker_instance is None:
         print("DEBUG: _broker_instance is None, creating new broker")
