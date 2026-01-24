@@ -42,9 +42,10 @@ def get_broker_name() -> str:
     """Get the name of the currently configured broker.
     
     Returns:
-        Broker name string
+        Broker name string (lowercase for CSS compatibility)
     """
     broker_type = os.environ.get('BROKER_TYPE', 'alpaca').lower()
     if broker_type == 'ibkr':
-        return 'Interactive Brokers'
-    return 'Alpaca'
+        return 'ibkr'
+    return 'alpaca'
+
