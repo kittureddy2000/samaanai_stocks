@@ -311,6 +311,9 @@ function Dashboard({ user, onLogout }) {
                             {market?.is_open ? 'Market Open' : 'Market Closed'}
                         </span>
                     </div>
+                    <div className={`broker-badge ${config?.broker?.toLowerCase() || 'alpaca'}`}>
+                        {config?.broker?.toUpperCase() || 'ALPACA'}
+                    </div>
                 </div>
                 <div className="header-right">
                     <span className="last-updated">Last updated: {lastUpdated || '--:--'}</span>

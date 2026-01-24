@@ -810,3 +810,25 @@ td {
     gap: 8px;
   }
 }
+
+/* Broker Badge */
+.broker-badge {
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.broker-badge.ibkr {
+  background: linear-gradient(135deg, #9f7aea, #805ad5);
+  color: white;
+  box-shadow: 0 0 12px rgba(159, 122, 234, 0.4);
+}
+
+.broker-badge.alpaca {
+  background: linear-gradient(135deg, var(--accent-green), #00c896);
+  color: white;
+  box-shadow: 0 0 12px rgba(0, 217, 165, 0.4);
+}
