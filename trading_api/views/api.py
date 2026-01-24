@@ -258,8 +258,28 @@ class ConfigView(APIView):
     
     def get(self, request):
         trading_config = settings.TRADING_CONFIG
+        
+        # Test TCP connection to IBKR
+        import socket
+        import os
+        host = os.environ.get('IBKR_GATEWAY_HOST', '10.138.0.3')
+        port = int(os.environ.get('IBKR_GATEWAY_PORT', '4002'))
+        
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(2)
+        try:
+            result = sock.connect_ex((host, port))
+            api_conn = "success" if result == 0 else f"failed (code={result})"
+        except Exception as e:
+            api_conn = f"error: {str(e)}"
+        finally:
+            sock.close()
+
         return Response({
             'broker': get_broker_info(),
+            'ibkr_connection_test': api_conn,
+            'ibkr_host': host,
+            'ibkr_port': port,
             'watchlist': trading_config['WATCHLIST'],
             'analysis_interval': trading_config['ANALYSIS_INTERVAL_MINUTES'],
             'max_position_pct': trading_config['MAX_POSITION_PCT'] * 100,
