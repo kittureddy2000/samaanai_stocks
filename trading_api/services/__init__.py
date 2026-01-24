@@ -38,9 +38,23 @@ def get_broker():
 
 
 def get_broker_name():
-    """Get the name of the configured broker."""
+    """Get the name of the ACTUAL broker in use.
+    
+    This checks the cached broker instance to get the real broker name,
+    which may differ from BROKER_TYPE if there was a fallback.
+    """
+    global _broker_instance
+    if _broker_instance is not None:
+        # Return actual broker name from instance
+        name = _broker_instance.name
+        # Normalize to lowercase for CSS compatibility
+        if 'Interactive Brokers' in name or 'IBKR' in name.upper():
+            return 'ibkr'
+        return 'alpaca'
+    # If no broker yet, return based on env var
     from src.trading.broker_factory import get_broker_name as _get_name
     return _get_name()
+
 
 
 def get_alpaca_client():
