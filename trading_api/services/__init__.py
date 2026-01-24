@@ -30,11 +30,18 @@ def get_broker():
     Uses the BROKER_TYPE environment variable to determine which broker to use.
     Returns a cached instance to avoid reconnection overhead.
     """
-    global _broker_instance
-    if _broker_instance is None:
-        from src.trading.broker_factory import get_broker as _get_broker
-        _broker_instance = _get_broker()
-    return _broker_instance
+    """
+    # global _broker_instance
+    # if _broker_instance is None:
+    #     print("DEBUG: _broker_instance is None, creating new broker")
+    #     from src.trading.broker_factory import get_broker as _get_broker
+    #     _broker_instance = _get_broker()
+    # return _broker_instance
+    
+    # DISABLE CACHING FOR DEBUGGING
+    print("DEBUG: caching DISABLED, creating new broker")
+    from src.trading.broker_factory import get_broker as _get_broker
+    return _get_broker()
 
 
 def get_broker_name():
