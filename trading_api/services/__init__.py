@@ -39,6 +39,10 @@ def get_broker():
 
 def get_broker_name():
     """Get the name of the configured broker."""
+    global _broker_instance
+    if _broker_instance:
+        return _broker_instance.name
+
     from src.trading.broker_factory import get_broker_name as _get_name
     return _get_name()
 

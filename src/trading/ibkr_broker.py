@@ -9,6 +9,15 @@ from datetime import datetime, timezone
 from loguru import logger
 import os
 
+import asyncio
+import sys
+
+# specific fix for cloud run/django env
+try:
+    asyncio.get_event_loop()
+except RuntimeError:
+    asyncio.set_event_loop(asyncio.new_event_loop())
+
 try:
     from ib_insync import IB, Stock, MarketOrder, LimitOrder
     IB_INSYNC_AVAILABLE = True
@@ -49,12 +58,15 @@ class IBKRBroker(BaseBroker):
             if self._connected and self.ib.isConnected():
                 return True
             
-            self.ib.connect(self.host, self.port, clientId=self.client_id)
+            logger.info(f"Attempting to connect to IBKR Gateway at {self.host}:{self.port} (Client ID: {self.client_id})...")
+            self.ib.connect(self.host, self.port, clientId=self.client_id, timeout=10)
             self._connected = True
             logger.info(f"✅ Connected to IBKR Gateway at {self.host}:{self.port}")
             return True
         except Exception as e:
             logger.error(f"❌ Failed to connect to IBKR: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             self._connected = False
             return False
     

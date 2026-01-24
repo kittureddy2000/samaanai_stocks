@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  # Local IB Gateway
+  ib-gateway:
+    image: ghcr.io/gnzsnz/ib-gateway:stable
+    container_name: ib-gateway-debug
+    environment:
+      - TWS_USERID=${TWS_USERID}
+      - TWS_PASSWORD=${TWS_PASSWORD}
+      - TRADING_MODE=paper
+      - VNC_PASSWORD=123456
+    ports:
+      - "4002:4002" # API port
+      - "5900:5900" # VNC port for login
+    restart: on-failure
+
+  # Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: trading-backend-debug
+    environment:
+      - BROKER_TYPE=ibkr
+      - IBKR_GATEWAY_HOST=ib-gateway
+      - IBKR_GATEWAY_PORT=4002
+      - IBKR_CLIENT_ID=1
+      # Essential Django settings
+      - DJANGO_SETTINGS_MODULE=backend.settings.development
+      - DEBUG=True
+      - DJANGO_SECRET_KEY=debug-secret
+      # Mock other dependencies to avoid startup errors if not needed for this test
+      - ALPACA_API_KEY=mock
+      - ALPACA_SECRET_KEY=mock
+      - DB_NAME=stock_trading
+      - DB_USER=trading_user
+      - DB_PASSWORD=trading_pass
+    volumes:
+      - ./src:/app/src
+    depends_on:
+      - ib-gateway
+    command: >
+      sh -c "
+        echo 'Waiting for IB Gateway...' &&
+        sleep 10 &&
+        python manage.py migrate --settings=backend.settings.development &&
+        python manage.py runserver 0.0.0.0:8080
+      "
