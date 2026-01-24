@@ -21,6 +21,7 @@ if SRC_DIR not in sys.path:
 
 
 # Cached broker instance
+# Force rebuild 2
 _broker_instance = None
 
 
