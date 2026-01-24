@@ -24,14 +24,28 @@ def get_broker() -> BaseBroker:
     logger.info(f"Initializing broker: {broker_type}")
     
     if broker_type == 'ibkr':
-        from src.trading.ibkr_broker import IBKRBroker
-        broker = IBKRBroker()
-        # IBKR requires explicit connection
-        if not broker.connect():
-            logger.error("Failed to connect to IBKR Gateway. Falling back to Alpaca.")
+        try:
+            print("DEBUG: Attempting to import IBKRBroker")
+            from src.trading.ibkr_broker import IBKRBroker
+            print("DEBUG: Instantiate IBKRBroker")
+            broker = IBKRBroker()
+            # IBKR requires explicit connection
+            print("DEBUG: Connecting to IBKR")
+            if not broker.connect():
+                print("DEBUG: IBKR connect() returned False")
+                logger.error("Failed to connect to IBKR Gateway. Falling back to Alpaca.")
+                from src.trading.alpaca_broker import AlpacaBroker
+                return AlpacaBroker()
+            print("DEBUG: IBKR connection successful")
+            return broker
+        except Exception as e:
+            import traceback
+            print(f"DEBUG: IBKR initialization failed: {e}")
+            print(traceback.format_exc())
+            logger.error(f"IBKR initialization failed: {e}")
+            # Default to Alpaca
             from src.trading.alpaca_broker import AlpacaBroker
             return AlpacaBroker()
-        return broker
     else:
         # Default to Alpaca
         from src.trading.alpaca_broker import AlpacaBroker
