@@ -425,7 +425,17 @@ gcloud logging read "resource.labels.service_name=trading-api" \
 
 ## 🏦 Interactive Brokers Integration
 
-The system supports switching between Alpaca and Interactive Brokers via environment variable.
+The system supports switching between Alpaca and Interactive Brokers via environment variable. IB Gateway runs as a Docker container on a GCE VM with **automatic login**.
+
+### Architecture
+
+```
+Cloud Run ──VPC Connector──► GCE VM (10.138.0.3:4002)
+     │                              │
+     │ HTTP/REST                    │ Docker Container
+     ▼                              ▼
+  Django API                  IB Gateway → IBKR Servers
+```
 
 ### Broker Selection
 
@@ -433,87 +443,115 @@ The system supports switching between Alpaca and Interactive Brokers via environ
 # Use Alpaca (default)
 export BROKER_TYPE=alpaca
 
-# Use Interactive Brokers
+# Use Interactive Brokers (already configured on Cloud Run)
 export BROKER_TYPE=ibkr
-export IBKR_GATEWAY_HOST=10.138.0.2    # VM internal IP
+export IBKR_GATEWAY_HOST=10.138.0.3    # VM internal IP
 export IBKR_GATEWAY_PORT=4002          # 4002=paper, 4001=live
 export IBKR_CLIENT_ID=1
 ```
 
-### IB Gateway VM (us-west1-b)
+### IB Gateway VM
 
 | Component | Details |
 |-----------|---------|
 | **VM Name** | `ibkr-gateway` |
-| **Machine Type** | e2-micro (Spot) |
-| **Monthly Cost** | ~$3.40 |
-| **Internal IP** | `10.138.0.2` |
-| **Ports** | 4001 (live), 4002 (paper) |
+| **Zone** | `us-west1-b` |
+| **Machine Type** | e2-small (Spot) |
+| **Internal IP** | `10.138.0.3` |
+| **Container** | `ghcr.io/gnzsnz/ib-gateway:stable` |
+| **Trading Mode** | Paper (account DUO726424) |
+| **VPC Connector** | `ibkr-connector` |
 
-### VM Setup Commands
+### Monthly Costs
+
+| Resource | Cost |
+|----------|------|
+| VM (e2-small spot) | ~$6 |
+| VPC Connector | ~$7 |
+| **Total** | **~$13/month** |
+
+### The Docker container handles login automatically!
+
+The IB Gateway Docker image (`ghcr.io/gnzsnz/ib-gateway`) includes IBC (IB Controller) which:
+- Automatically logs in using credentials passed via environment variables
+- Dismisses popups and warnings
+- Restarts the gateway if it crashes
+- No manual login required!
+
+### VM Management Commands
 
 ```bash
-# SSH into IB Gateway VM
-gcloud compute ssh ibkr-gateway --zone=us-west1-b
+# SSH into IB Gateway VM (uses IAP tunnel)
+gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap
 
-# View logs
-sudo journalctl -u ibgateway -f
+# View container logs (live)
+gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap \
+  --command='docker logs -f ibgateway'
 
-# Restart gateway
-sudo systemctl restart ibgateway
+# View recent logs
+gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap \
+  --command='docker logs ibgateway --tail 50'
 
-# Check status
-sudo systemctl status ibgateway
+# Check container status
+gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap \
+  --command='docker ps'
+
+# Restart container
+gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap \
+  --command='docker restart ibgateway'
+
+# Check if port 4002 is listening
+gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap \
+  --command='ss -tlnp | grep 4002'
 ```
 
-### Pending Setup (After Getting IBKR Password)
 ### Updating IBKR Credentials
 
 ```bash
-# SSH into the VM
-gcloud compute ssh ibkr-gateway --zone=us-west1-b
+# Stop and remove old container
+gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap \
+  --command='docker stop ibgateway && docker rm ibgateway'
 
-# Edit credentials in both locations:
-nano ~/ibc/config.ini
-sudo nano /opt/ibc/config.ini
-
-# Update these lines:
-# IbLoginId=YOUR_USERNAME
-# IbPassword=YOUR_PASSWORD
-# TradingMode=paper  (or "live")
-
-# Restart the service
-sudo systemctl restart ibgateway
-
-# Check status
-sudo systemctl status ibgateway
-sudo journalctl -u ibgateway -n 50
+# Start new container with updated credentials
+gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap \
+  --command='docker run -d --name ibgateway --restart=always \
+    -p 4001:4001 -p 4002:4002 \
+    -e TWS_USERID=YOUR_USERNAME \
+    -e TWS_PASSWORD=YOUR_PASSWORD \
+    -e TRADING_MODE=paper \
+    -e READ_ONLY_API=no \
+    ghcr.io/gnzsnz/ib-gateway:stable'
 ```
 
-### IB Gateway Requirements
+### Switching to Live Trading
 
-| Component | Requirement |
-|-----------|-------------|
-| **Java** | OpenJDK 17+ |
-| **Display** | Xvfb (virtual framebuffer) |
-| **Memory** | 768MB+ recommended |
-| **IBC** | v3.23.0 for automated login |
+```bash
+# Update Cloud Run environment
+gcloud run services update samaanai-backend-staging \
+  --region=us-west1 \
+  --update-env-vars=IBKR_GATEWAY_PORT=4001
+
+# Restart container with live mode
+gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap \
+  --command='docker stop ibgateway && docker rm ibgateway && \
+    docker run -d --name ibgateway --restart=always \
+    -p 4001:4001 -p 4002:4002 \
+    -e TWS_USERID=YOUR_USERNAME \
+    -e TWS_PASSWORD=YOUR_PASSWORD \
+    -e TRADING_MODE=live \
+    -e READ_ONLY_API=no \
+    ghcr.io/gnzsnz/ib-gateway:stable'
+```
 
 ### Troubleshooting
 
-```bash
-# Check if services are running
-sudo systemctl status xvfb ibgateway
-
-# View logs
-sudo journalctl -u ibgateway -f
-
-# Check if port is listening
-ss -tlnp | grep 4002
-
-# Restart everything
-sudo systemctl restart xvfb ibgateway
-```
+| Issue | Solution |
+|-------|----------|
+| Container not running | `docker restart ibgateway` |
+| Login failed | Check credentials in `docker logs ibgateway` |
+| Port not listening | Wait 30-60 seconds for gateway startup |
+| Connection timeout | Verify VPC connector: `gcloud compute networks vpc-access connectors list --region=us-west1` |
+| VM stopped (spot preemption) | `gcloud compute instances start ibkr-gateway --zone=us-west1-b` |
 
 ---
 
