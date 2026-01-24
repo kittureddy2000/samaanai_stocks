@@ -275,8 +275,14 @@ class ConfigView(APIView):
         finally:
             sock.close()
 
+        # Debug info for broker selection
+        broker_type_env = os.environ.get('BROKER_TYPE', 'unknown')
+        broker_name = get_broker_info().get('name')
+        
         return Response({
             'broker': get_broker_info(),
+            'debug_broker_type_env': broker_type_env,
+            'debug_broker_name_computed': broker_name,
             'ibkr_connection_test': api_conn,
             'ibkr_host': host,
             'ibkr_port': port,
