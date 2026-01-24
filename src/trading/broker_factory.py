@@ -21,6 +21,10 @@ def get_broker() -> BaseBroker:
     """
     broker_type = os.environ.get('BROKER_TYPE', 'alpaca').lower()
     
+    import sys
+    print(f"DEBUG: get_broker called. BROKER_TYPE={broker_type}")
+    sys.stdout.flush()
+    
     logger.info(f"Initializing broker: {broker_type}")
     
     if broker_type == 'ibkr':
@@ -48,6 +52,8 @@ def get_broker() -> BaseBroker:
             return AlpacaBroker()
     else:
         # Default to Alpaca
+        print("DEBUG: Using Alpaca (default)")
+        sys.stdout.flush()
         from src.trading.alpaca_broker import AlpacaBroker
         return AlpacaBroker()
 
