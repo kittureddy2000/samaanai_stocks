@@ -1,19 +1,26 @@
-version: '3.8'
-
 services:
   # Local IB Gateway
   ib-gateway:
     image: ghcr.io/gnzsnz/ib-gateway:stable
     container_name: ib-gateway-debug
+    env_file:
+      - .env.debug
     environment:
-      - TWS_USERID=${TWS_USERID}
-      - TWS_PASSWORD=${TWS_PASSWORD}
       - TRADING_MODE=paper
       - VNC_PASSWORD=123456
+      - EXISTING_SESSION_DETECTED_ACTION=primary
+      - ACCEPT_INCOMING_CONNECTION=accept
+      - TWOFA_TIMEOUT_ACTION=restart
+      - READ_ONLY_API=no
+      # IBC config setting to trust all Docker network IPs
+      - IBC_TrustedTwsApiClientIPs=0.0.0.0/0
     ports:
       - "4002:4002" # API port
+      - "4004:4004" # SOCAT forwarded port (accessible from Docker network)
       - "5900:5900" # VNC port for login
     restart: on-failure
+    networks:
+      - trading-net
 
   # Backend API
   backend:
@@ -24,7 +31,7 @@ services:
     environment:
       - BROKER_TYPE=ibkr
       - IBKR_GATEWAY_HOST=ib-gateway
-      - IBKR_GATEWAY_PORT=4002
+      - IBKR_GATEWAY_PORT=4004
       - IBKR_CLIENT_ID=1
       # Essential Django settings
       - DJANGO_SETTINGS_MODULE=backend.settings.development
@@ -36,14 +43,22 @@ services:
       - DB_NAME=stock_trading
       - DB_USER=trading_user
       - DB_PASSWORD=trading_pass
+    ports:
+      - "8080:8080"
     volumes:
       - ./src:/app/src
     depends_on:
       - ib-gateway
+    networks:
+      - trading-net
     command: >
       sh -c "
         echo 'Waiting for IB Gateway...' &&
-        sleep 10 &&
+        sleep 20 &&
         python manage.py migrate --settings=backend.settings.development &&
         python manage.py runserver 0.0.0.0:8080
       "
+
+networks:
+  trading-net:
+    driver: bridge

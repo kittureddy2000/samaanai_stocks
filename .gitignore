@@ -52,3 +52,4 @@ frontend/.env.local
 db.sqlite3
 staticfiles/
 *.pyc
+.env.debug

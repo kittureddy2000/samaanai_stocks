@@ -68,7 +68,7 @@ jobs:
             FRONTEND_URL=https://trading-dashboard-staging-362270100637.us-west1.run.app
             BROKER_TYPE=ibkr
             IBKR_GATEWAY_HOST=10.138.0.3
-            IBKR_GATEWAY_PORT=4002
+            IBKR_GATEWAY_PORT=4004
       
       - name: Run Django Migrations
         run: |
