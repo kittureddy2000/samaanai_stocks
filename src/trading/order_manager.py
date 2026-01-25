@@ -4,7 +4,7 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime
 from loguru import logger
 
-from .alpaca_client import AlpacaTradingClient
+from .broker_factory import get_broker
 from .risk_controls import RiskManager
 
 import sys
@@ -14,10 +14,10 @@ from llm.llm_client import TradeDecision
 
 class OrderManager:
     """Manages order execution and tracking."""
-    
+
     def __init__(self):
         """Initialize the order manager."""
-        self.trading_client = AlpacaTradingClient()
+        self.broker = get_broker()
         self.risk_manager = RiskManager()
         self.executed_orders: List[Dict[str, Any]] = []
     
@@ -36,7 +36,7 @@ class OrderManager:
             return None
         
         # Get current account status for risk checks
-        account = self.trading_client.get_account()
+        account = self.broker.get_account()
         if not account:
             logger.error("Cannot execute trade: failed to get account info")
             return None
@@ -45,7 +45,7 @@ class OrderManager:
         risk_result = self.risk_manager.check_trade(
             decision=decision,
             account=account,
-            current_positions=self.trading_client.get_positions()
+            current_positions=self.broker.get_positions()
         )
         
         if not risk_result['approved']:
@@ -61,14 +61,14 @@ class OrderManager:
         order = None
         
         if decision.order_type == 'limit' and decision.limit_price:
-            order = self.trading_client.place_limit_order(
+            order = self.broker.place_limit_order(
                 symbol=decision.symbol,
                 qty=decision.quantity,
                 side=decision.action.lower(),
                 limit_price=decision.limit_price
             )
         else:
-            order = self.trading_client.place_market_order(
+            order = self.broker.place_market_order(
                 symbol=decision.symbol,
                 qty=decision.quantity,
                 side=decision.action.lower()
@@ -131,7 +131,7 @@ class OrderManager:
         Returns:
             Order info or None
         """
-        return self.trading_client.get_order(order_id)
+        return self.broker.get_order(order_id)
     
     def cancel_pending_orders(self) -> bool:
         """Cancel all pending orders.
@@ -139,4 +139,4 @@ class OrderManager:
         Returns:
             True if successful
         """
-        return self.trading_client.cancel_all_orders()
+        return self.broker.cancel_all_orders()

@@ -462,6 +462,13 @@ export IBKR_CLIENT_ID=1
 | **Trading Mode** | Paper (account DUO726424) |
 | **VPC Connector** | `ibkr-connector` |
 
+### Paper Trading Credentials
+*These are pre-configured in the deployment/script but documented here for reference.*
+
+*   **Username**: `kittureddy2000@gmail.com`
+*   **Password**: *(Check your password manager or ask admin)*
+*   **Paper Account**: `DUO726424`
+
 ### Monthly Costs
 
 | Resource | Cost |

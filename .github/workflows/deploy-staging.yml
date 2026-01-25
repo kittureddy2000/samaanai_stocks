@@ -53,8 +53,6 @@ jobs:
           env_vars: |
             DJANGO_SETTINGS_MODULE=backend.settings.production
             DJANGO_SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}
-            ALPACA_API_KEY=${{ secrets.ALPACA_API_KEY }}
-            ALPACA_SECRET_KEY=${{ secrets.ALPACA_SECRET_KEY }}
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
             NEWS_API_KEY=${{ secrets.NEWS_API_KEY }}
             GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}

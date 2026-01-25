@@ -4,15 +4,15 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime, date
 from loguru import logger
 
-from .alpaca_client import AlpacaTradingClient
+from .broker_factory import get_broker
 
 
 class PortfolioTracker:
     """Tracks portfolio performance and positions."""
-    
+
     def __init__(self):
         """Initialize the portfolio tracker."""
-        self.trading_client = AlpacaTradingClient()
+        self.broker = get_broker()
         self.daily_snapshots: List[Dict[str, Any]] = []
         self.starting_value: Optional[float] = None
     
@@ -22,8 +22,8 @@ class PortfolioTracker:
         Returns:
             Portfolio summary dictionary
         """
-        account = self.trading_client.get_account()
-        positions = self.trading_client.get_positions()
+        account = self.broker.get_account()
+        positions = self.broker.get_positions()
         
         if not account:
             return {'error': 'Failed to get account info'}
@@ -70,7 +70,7 @@ class PortfolioTracker:
         Returns:
             List of position summaries
         """
-        positions = self.trading_client.get_positions()
+        positions = self.broker.get_positions()
         
         summaries = []
         for pos in positions:
@@ -123,7 +123,7 @@ class PortfolioTracker:
         if self.starting_value is None:
             self.record_snapshot()
         
-        account = self.trading_client.get_account()
+        account = self.broker.get_account()
         if not account:
             return {'error': 'Failed to get account'}
         

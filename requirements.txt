@@ -22,9 +22,6 @@ pg8000>=1.30.0          # Alternative PostgreSQL adapter
 gunicorn>=21.0.0
 whitenoise>=6.6.0
 
-# Trading API (Alpaca)
-alpaca-py>=0.30.0
-
 # Trading API (Interactive Brokers)
 ib_insync>=0.9.86
 

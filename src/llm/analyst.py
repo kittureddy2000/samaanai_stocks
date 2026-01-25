@@ -172,30 +172,30 @@ class TradingAnalyst:
         return validated
     
     def test_connection(self) -> bool:
-        """Test all connections (Alpaca data + OpenAI).
-        
+        """Test all connections (market data + Gemini LLM).
+
         Returns:
             True if all connections successful
         """
         logger.info("Testing connections...")
-        
-        # Test Alpaca data
+
+        # Test market data (yfinance)
         try:
             price = self.data_aggregator.market_client.get_current_price("AAPL")
             if price:
-                logger.info(f"✅ Alpaca data connection OK (AAPL: ${price})")
+                logger.info(f"✅ Market data connection OK (AAPL: ${price})")
             else:
-                logger.error("❌ Alpaca data connection failed")
+                logger.error("❌ Market data connection failed")
                 return False
         except Exception as e:
-            logger.error(f"❌ Alpaca data connection failed: {e}")
+            logger.error(f"❌ Market data connection failed: {e}")
             return False
-        
-        # Test OpenAI
+
+        # Test Gemini LLM
         if self.llm_client.test_connection():
-            logger.info("✅ OpenAI connection OK")
+            logger.info("✅ Gemini LLM connection OK")
         else:
-            logger.error("❌ OpenAI connection failed")
+            logger.error("❌ Gemini LLM connection failed")
             return False
-        
+
         return True

@@ -1,7 +1,7 @@
 """Broker abstraction layer for multi-broker support.
 
 Provides a standardized interface for trading operations that can be
-implemented by different brokers (Alpaca, Interactive Brokers, etc.).
+implemented by the IBKR broker.
 """
 
 from abc import ABC, abstractmethod
@@ -51,7 +51,7 @@ class Order:
 class BaseBroker(ABC):
     """Abstract base class for broker implementations.
     
-    All broker implementations (Alpaca, IBKR, etc.) must implement this interface
+    The IBKR broker implementation must implement this interface
     to ensure consistent behavior across the trading system.
     """
     

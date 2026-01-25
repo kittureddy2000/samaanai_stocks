@@ -74,7 +74,7 @@ class Order(Base):
     user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
     
     # Order identification
-    order_id = Column(String(100), unique=True, nullable=True)  # Alpaca order ID
+    order_id = Column(String(100), unique=True, nullable=True)  # Broker order ID
     client_order_id = Column(String(100), nullable=True)
     
     # Order details

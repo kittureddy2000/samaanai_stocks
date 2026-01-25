@@ -40,32 +40,12 @@ def get_broker():
 
 
 def get_broker_name():
-    """Get the name of the ACTUAL broker in use.
-    
-    This checks the cached broker instance to get the real broker name,
-    which may differ from BROKER_TYPE if there was a fallback.
+    """Get the name of the broker (always 'ibkr').
+
+    Returns:
+        Broker name string
     """
-    global _broker_instance
-    if _broker_instance is not None:
-        # Return actual broker name from instance
-        name = _broker_instance.name
-        # Normalize to lowercase for CSS compatibility
-        if 'Interactive Brokers' in name or 'IBKR' in name.upper():
-            return 'ibkr'
-        return 'alpaca'
-    # If no broker yet, return based on env var
-    from src.trading.broker_factory import get_broker_name as _get_name
-    return _get_name()
-
-
-
-def get_alpaca_client():
-    """Lazily import AlpacaTradingClient.
-    
-    DEPRECATED: Use get_broker() for multi-broker support.
-    """
-    from src.trading.alpaca_client import AlpacaTradingClient
-    return AlpacaTradingClient
+    return 'ibkr'
 
 
 def get_risk_manager():
@@ -125,7 +105,6 @@ def get_slack():
 __all__ = [
     'get_broker',
     'get_broker_name',
-    'get_alpaca_client',
     'get_risk_manager',
     'get_order_manager',
     'get_portfolio_tracker',

@@ -1,7 +1,6 @@
-"""Broker factory for multi-broker support.
+"""Broker factory for IBKR trading.
 
-Provides a factory function to instantiate the appropriate broker
-based on environment configuration.
+Provides a factory function to instantiate the IBKR broker.
 """
 
 import os
@@ -9,63 +8,62 @@ from loguru import logger
 from src.trading.broker_base import BaseBroker
 
 
+class BrokerConnectionError(Exception):
+    """Raised when broker connection fails."""
+    pass
+
+
 def get_broker() -> BaseBroker:
-    """Factory function to get the configured broker.
-    
-    Uses the BROKER_TYPE environment variable to determine which broker to use:
-    - 'alpaca' (default): Use Alpaca paper trading
-    - 'ibkr': Use Interactive Brokers
-    
+    """Factory function to get the IBKR broker.
+
     Returns:
-        BaseBroker implementation instance
+        IBKRBroker instance
+
+    Raises:
+        BrokerConnectionError: If IBKR connection fails
     """
-    broker_type = os.environ.get('BROKER_TYPE', 'alpaca').lower()
-    
-    import sys
-    print(f"DEBUG: get_broker called. BROKER_TYPE={broker_type}")
-    sys.stdout.flush()
-    
+    broker_type = os.environ.get('BROKER_TYPE', 'ibkr').lower()
+
     logger.info(f"Initializing broker: {broker_type}")
-    
-    if broker_type == 'ibkr':
-        try:
-            print("DEBUG: Attempting to import IBKRBroker")
-            from src.trading.ibkr_broker import IBKRBroker
-            print("DEBUG: Instantiate IBKRBroker")
-            broker = IBKRBroker()
-            # IBKR requires explicit connection
-            print("DEBUG: Connecting to IBKR")
-            if not broker.connect():
-                print("DEBUG: IBKR connect() returned False")
-                logger.error("Failed to connect to IBKR Gateway. Falling back to Alpaca.")
-                from src.trading.alpaca_broker import AlpacaBroker
-                return AlpacaBroker()
-            print("DEBUG: IBKR connection successful")
-            return broker
-        except Exception as e:
-            import traceback
-            print(f"DEBUG: IBKR initialization failed: {e}")
-            print(traceback.format_exc())
-            logger.error(f"IBKR initialization failed: {e}")
-            # Default to Alpaca
-            from src.trading.alpaca_broker import AlpacaBroker
-            return AlpacaBroker()
-    else:
-        # Default to Alpaca
-        print("DEBUG: Using Alpaca (default)")
-        sys.stdout.flush()
-        from src.trading.alpaca_broker import AlpacaBroker
-        return AlpacaBroker()
+
+    if broker_type != 'ibkr':
+        logger.warning(f"BROKER_TYPE={broker_type} is not supported. Only 'ibkr' is available.")
+
+    try:
+        from src.trading.ibkr_broker import IBKRBroker
+        broker = IBKRBroker()
+
+        # IBKR requires explicit connection
+        if not broker.connect():
+            error_msg = (
+                f"Failed to connect to IBKR Gateway at "
+                f"{os.environ.get('IBKR_GATEWAY_HOST', '127.0.0.1')}:"
+                f"{os.environ.get('IBKR_GATEWAY_PORT', '4004')}. "
+                "Please ensure IB Gateway is running and accessible."
+            )
+            logger.error(error_msg)
+            raise BrokerConnectionError(error_msg)
+
+        logger.info("✅ IBKR broker connected successfully")
+        return broker
+
+    except ImportError as e:
+        error_msg = f"Failed to import IBKRBroker: {e}. Ensure ib_insync is installed."
+        logger.error(error_msg)
+        raise BrokerConnectionError(error_msg)
+    except BrokerConnectionError:
+        raise
+    except Exception as e:
+        import traceback
+        logger.error(f"IBKR initialization failed: {e}")
+        logger.error(traceback.format_exc())
+        raise BrokerConnectionError(f"IBKR initialization failed: {e}")
 
 
 def get_broker_name() -> str:
-    """Get the name of the currently configured broker.
-    
-    Returns:
-        Broker name string (lowercase for CSS compatibility)
-    """
-    broker_type = os.environ.get('BROKER_TYPE', 'alpaca').lower()
-    if broker_type == 'ibkr':
-        return 'ibkr'
-    return 'alpaca'
+    """Get the name of the broker.
 
+    Returns:
+        Broker name string (always 'ibkr')
+    """
+    return 'ibkr'
