@@ -277,10 +277,10 @@ class ConfigView(APIView):
 
         # Debug info for broker selection
         broker_type_env = os.environ.get('BROKER_TYPE', 'unknown')
-        broker_name = get_broker_info().get('name')
-        
+        broker_name = get_broker_info()
+
         return Response({
-            'broker': get_broker_info(),
+            'broker': broker_name,
             'debug_broker_type_env': broker_type_env,
             'debug_broker_name_computed': broker_name,
             'ibkr_connection_test': api_conn,
