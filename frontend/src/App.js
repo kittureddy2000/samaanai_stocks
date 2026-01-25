@@ -8,6 +8,7 @@ import {
     getTrades,
     getConfig,
     getIndicators,
+    getBrokerStatus,
     getCurrentUser,
     register,
     login,
@@ -241,26 +242,29 @@ function Dashboard({ user, onLogout }) {
     const [trades, setTrades] = useState([]);
     const [config, setConfig] = useState(null);
     const [indicators, setIndicators] = useState([]);
+    const [brokerStatus, setBrokerStatus] = useState(null);
     const [lastUpdated, setLastUpdated] = useState(null);
     const [loading, setLoading] = useState(true);
 
     const fetchData = useCallback(async () => {
         try {
-            const [portfolioData, riskData, marketData, watchlistData, tradesData, configData] = await Promise.all([
-                getPortfolio(),
-                getRisk(),
+            const [portfolioData, riskData, marketData, watchlistData, tradesData, configData, brokerStatusData] = await Promise.all([
+                getPortfolio().catch(e => ({ error: e.message })),
+                getRisk().catch(e => ({ error: e.message })),
                 getMarket(),
-                getWatchlist(),
-                getTrades(),
-                getConfig(),
+                getWatchlist().catch(e => ({ watchlist: [] })),
+                getTrades().catch(e => ({ trades: [] })),
+                getConfig().catch(e => ({})),
+                getBrokerStatus().catch(e => ({ overall_status: 'error', errors: [e.message], can_trade: false })),
             ]);
 
-            setPortfolio(portfolioData);
-            setRisk(riskData);
+            setPortfolio(portfolioData.error ? null : portfolioData);
+            setRisk(riskData.error ? null : riskData);
             setMarket(marketData);
             setWatchlist(watchlistData.watchlist || []);
             setTrades(tradesData.trades || []);
             setConfig(configData);
+            setBrokerStatus(brokerStatusData);
             setLastUpdated(new Date().toLocaleTimeString());
             setLoading(false);
 
@@ -311,8 +315,11 @@ function Dashboard({ user, onLogout }) {
                             {market?.is_open ? 'Market Open' : 'Market Closed'}
                         </span>
                     </div>
-                    <div className={`broker-badge ${config?.broker?.toLowerCase() || 'ibkr'}`}>
+                    <div className={`broker-badge ${config?.broker?.toLowerCase() || 'ibkr'} ${brokerStatus?.overall_status === 'connected' ? 'connected' : 'disconnected'}`}>
                         {config?.broker?.toUpperCase() || 'IBKR'}
+                        <span className={`connection-indicator ${brokerStatus?.overall_status === 'connected' ? 'connected' : 'error'}`}>
+                            {brokerStatus?.overall_status === 'connected' ? '●' : '○'}
+                        </span>
                     </div>
                 </div>
                 <div className="header-right">
@@ -325,6 +332,41 @@ function Dashboard({ user, onLogout }) {
                     </div>
                 </div>
             </header>
+
+            {/* Broker Connection Error Banner */}
+            {brokerStatus && brokerStatus.overall_status !== 'connected' && (
+                <div className="error-banner">
+                    <div className="error-banner-content">
+                        <span className="error-icon">⚠️</span>
+                        <div className="error-details">
+                            <strong>Broker Connection Issue</strong>
+                            <p>
+                                {brokerStatus.errors && brokerStatus.errors.length > 0
+                                    ? brokerStatus.errors.join('. ')
+                                    : 'Unable to connect to IBKR Gateway. Trading is disabled.'}
+                            </p>
+                            {brokerStatus.gateway && (
+                                <span className="error-meta">
+                                    Gateway: {brokerStatus.gateway.host}:{brokerStatus.gateway.port}
+                                </span>
+                            )}
+                        </div>
+                        <button className="btn-retry" onClick={fetchData}>Retry</button>
+                    </div>
+                </div>
+            )}
+
+            {/* Connection Status Success Banner (dismissible) */}
+            {brokerStatus && brokerStatus.overall_status === 'connected' && brokerStatus.checks?.account_data && (
+                <div className="success-banner">
+                    <span className="success-icon">✅</span>
+                    <span>
+                        Connected to IBKR • Account: {brokerStatus.checks.account_data.account_id} •
+                        Cash: {formatCurrency(brokerStatus.checks.account_data.cash || 0)} •
+                        Portfolio: {formatCurrency(brokerStatus.checks.account_data.portfolio_value || 0)}
+                    </span>
+                </div>
+            )}
 
             {/* Main Grid */}
             <div className="main-grid">

@@ -104,6 +104,120 @@ def get_data_aggregator():
     return DataAggregator()
 
 
+class BrokerStatusView(APIView):
+    """Get detailed broker connection status and diagnostics."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        import os
+        import socket
+        from datetime import datetime
+
+        broker_name = get_broker_info()
+        host = os.environ.get('IBKR_GATEWAY_HOST', '127.0.0.1')
+        port = int(os.environ.get('IBKR_GATEWAY_PORT', '4004'))
+
+        status = {
+            'broker': broker_name,
+            'timestamp': datetime.now().isoformat(),
+            'gateway': {
+                'host': host,
+                'port': port,
+            },
+            'checks': {},
+            'errors': [],
+        }
+
+        # Check 1: TCP connectivity to IBKR Gateway
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            result = sock.connect_ex((host, port))
+            sock.close()
+
+            if result == 0:
+                status['checks']['tcp_connection'] = {
+                    'status': 'ok',
+                    'message': f'TCP connection to {host}:{port} successful'
+                }
+            else:
+                status['checks']['tcp_connection'] = {
+                    'status': 'error',
+                    'message': f'TCP connection failed (code={result})'
+                }
+                status['errors'].append(f'Cannot reach IBKR Gateway at {host}:{port}')
+        except Exception as e:
+            status['checks']['tcp_connection'] = {
+                'status': 'error',
+                'message': str(e)
+            }
+            status['errors'].append(f'TCP connection error: {str(e)}')
+
+        # Check 2: Broker API connection
+        try:
+            from trading_api.services import get_broker
+            broker = get_broker()
+
+            if broker.test_connection():
+                status['checks']['api_connection'] = {
+                    'status': 'ok',
+                    'message': 'IBKR API connection verified'
+                }
+            else:
+                status['checks']['api_connection'] = {
+                    'status': 'error',
+                    'message': 'IBKR API connection test failed'
+                }
+                status['errors'].append('Broker API connection test failed')
+        except Exception as e:
+            status['checks']['api_connection'] = {
+                'status': 'error',
+                'message': str(e)
+            }
+            status['errors'].append(f'Broker API error: {str(e)}')
+
+        # Check 3: Account data retrieval
+        try:
+            trading_client = get_trading_client()
+            account = trading_client.get_account()
+
+            if account:
+                status['checks']['account_data'] = {
+                    'status': 'ok',
+                    'message': f'Account {account.get("id", "unknown")} accessible',
+                    'account_id': account.get('id'),
+                    'cash': account.get('cash'),
+                    'portfolio_value': account.get('portfolio_value'),
+                    'buying_power': account.get('buying_power'),
+                }
+                status['trading_ready'] = True
+            else:
+                status['checks']['account_data'] = {
+                    'status': 'error',
+                    'message': 'Failed to retrieve account data'
+                }
+                status['errors'].append('Cannot retrieve account data from broker')
+                status['trading_ready'] = False
+        except Exception as e:
+            status['checks']['account_data'] = {
+                'status': 'error',
+                'message': str(e)
+            }
+            status['errors'].append(f'Account data error: {str(e)}')
+            status['trading_ready'] = False
+
+        # Overall status
+        all_checks_ok = all(
+            check.get('status') == 'ok'
+            for check in status['checks'].values()
+        )
+        status['overall_status'] = 'connected' if all_checks_ok else 'error'
+        status['can_trade'] = all_checks_ok and status.get('trading_ready', False)
+
+        return Response(status)
+
+
 class PortfolioView(APIView):
     """Get current portfolio data."""
     

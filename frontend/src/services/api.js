@@ -163,4 +163,9 @@ export const getIndicators = async () => {
     return response.data;
 };
 
+export const getBrokerStatus = async () => {
+    const response = await api.get('/api/broker-status');
+    return response.data;
+};
+
 export default api;

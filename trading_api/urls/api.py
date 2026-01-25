@@ -4,6 +4,9 @@ from django.urls import path
 from trading_api.views import api
 
 urlpatterns = [
+    # Broker connection status
+    path('broker-status', api.BrokerStatusView.as_view(), name='api-broker-status'),
+
     # Portfolio and account
     path('portfolio', api.PortfolioView.as_view(), name='api-portfolio'),
     

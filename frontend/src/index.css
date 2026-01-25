@@ -832,3 +832,110 @@ td {
   color: white;
   box-shadow: 0 0 12px rgba(0, 217, 165, 0.4);
 }
+
+/* Connection indicator inside broker badge */
+.broker-badge .connection-indicator {
+  margin-left: 6px;
+  font-size: 10px;
+}
+
+.broker-badge .connection-indicator.connected {
+  color: #00d9a5;
+  text-shadow: 0 0 6px rgba(0, 217, 165, 0.8);
+}
+
+.broker-badge .connection-indicator.error {
+  color: #ff6b6b;
+  text-shadow: 0 0 6px rgba(255, 107, 107, 0.8);
+  animation: pulse 1.5s infinite;
+}
+
+.broker-badge.disconnected {
+  opacity: 0.7;
+  border: 1px solid #ff6b6b;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Error Banner */
+.error-banner {
+  background: linear-gradient(135deg, rgba(255, 107, 107, 0.15), rgba(255, 71, 87, 0.1));
+  border: 1px solid rgba(255, 107, 107, 0.3);
+  border-radius: 12px;
+  margin: 0 24px 20px;
+  padding: 16px 20px;
+}
+
+.error-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.error-icon {
+  font-size: 24px;
+}
+
+.error-details {
+  flex: 1;
+}
+
+.error-details strong {
+  color: #ff6b6b;
+  font-size: 14px;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.error-details p {
+  color: #a0a0a0;
+  font-size: 13px;
+  margin: 0;
+}
+
+.error-meta {
+  font-size: 11px;
+  color: #666;
+  margin-top: 4px;
+  display: block;
+}
+
+.btn-retry {
+  background: rgba(255, 107, 107, 0.2);
+  border: 1px solid rgba(255, 107, 107, 0.4);
+  color: #ff6b6b;
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+
+.btn-retry:hover {
+  background: rgba(255, 107, 107, 0.3);
+}
+
+/* Success Banner */
+.success-banner {
+  background: linear-gradient(135deg, rgba(0, 217, 165, 0.1), rgba(0, 200, 150, 0.05));
+  border: 1px solid rgba(0, 217, 165, 0.2);
+  border-radius: 12px;
+  margin: 0 24px 20px;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: #a0a0a0;
+}
+
+.success-icon {
+  font-size: 16px;
+}
+
+.success-banner span {
+  color: #00d9a5;
+}
