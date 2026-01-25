@@ -83,8 +83,13 @@ CORS_ALLOWED_ORIGINS = [
     'https://stg.trading.samaanai.com',
     'https://trading.samaanai.com',
     'https://trading-dashboard-staging-hdp6ioqupa-uc.a.run.app',
+    'https://trading-dashboard-staging-hdp6ioqupa-uw.a.run.app',
+    'https://trading-dashboard-staging-362270100637.us-west1.run.app',
 ]
 CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://trading-.*\.run\.app$",
+]
 
 
 # Security settings for production
