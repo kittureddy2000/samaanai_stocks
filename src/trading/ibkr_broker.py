@@ -34,20 +34,24 @@ from src.trading.broker_base import BaseBroker, AccountInfo, Position, Order
 
 class IBKRBroker(BaseBroker):
     """Interactive Brokers implementation of BaseBroker interface.
-    
+
     Requires IB Gateway or TWS to be running and accessible.
     """
-    
+
+    def _ensure_event_loop(self):
+        """Ensure an event loop exists in the current thread."""
+        try:
+            asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
     def __init__(self):
         """Initialize the IBKR broker."""
         # Late import to ensure event loop exists in this thread
         try:
-            import asyncio
-            try:
-                asyncio.get_event_loop()
-            except RuntimeError:
-                asyncio.set_event_loop(asyncio.new_event_loop())
-                
+            self._ensure_event_loop()
+
             import ib_insync
             self.ib_module = ib_insync
             self.IB = ib_insync.IB
@@ -57,13 +61,13 @@ class IBKRBroker(BaseBroker):
         except ImportError:
             logger.warning("ib_insync not installed. IBKR trading will not be available.")
             raise ImportError("ib_insync is required for IBKR trading")
-        
+
         self.ib = self.IB()
         self.host = os.environ.get('IBKR_GATEWAY_HOST', '127.0.0.1')
         self.port = int(os.environ.get('IBKR_GATEWAY_PORT', '4002'))  # 4001=live, 4002=paper
         self.client_id = int(os.environ.get('IBKR_CLIENT_ID', '1'))
         self._connected = False
-        
+
         logger.info(f"IBKRBroker initialized: host={self.host}, port={self.port}, client_id={self.client_id}")
     
     @property
@@ -74,9 +78,10 @@ class IBKRBroker(BaseBroker):
     def connect(self) -> bool:
         """Connect to IB Gateway."""
         try:
+            self._ensure_event_loop()
             if self._connected and self.ib.isConnected():
                 return True
-            
+
             logger.info(f"Attempting to connect to IBKR Gateway at {self.host}:{self.port} (Client ID: {self.client_id})...")
             self.ib.connect(self.host, self.port, clientId=self.client_id, timeout=10)
             self._connected = True
@@ -102,6 +107,7 @@ class IBKRBroker(BaseBroker):
     def test_connection(self) -> bool:
         """Test the broker connection."""
         try:
+            self._ensure_event_loop()
             if not self._connected:
                 if not self.connect():
                     return False
@@ -121,6 +127,7 @@ class IBKRBroker(BaseBroker):
     def get_account(self) -> Optional[AccountInfo]:
         """Get account information from IBKR."""
         try:
+            self._ensure_event_loop()
             if not self._connected:
                 self.connect()
             
@@ -153,6 +160,7 @@ class IBKRBroker(BaseBroker):
     def get_positions(self) -> List[Position]:
         """Get all open positions from IBKR."""
         try:
+            self._ensure_event_loop()
             if not self._connected:
                 self.connect()
             
@@ -192,6 +200,7 @@ class IBKRBroker(BaseBroker):
     def place_market_order(self, symbol: str, qty: int, side: str) -> Optional[Order]:
         """Place a market order on IBKR."""
         try:
+            self._ensure_event_loop()
             if not self._connected:
                 self.connect()
             
@@ -224,6 +233,7 @@ class IBKRBroker(BaseBroker):
     def place_limit_order(self, symbol: str, qty: int, side: str, limit_price: float) -> Optional[Order]:
         """Place a limit order on IBKR."""
         try:
+            self._ensure_event_loop()
             if not self._connected:
                 self.connect()
             
@@ -255,6 +265,7 @@ class IBKRBroker(BaseBroker):
     def get_order(self, order_id: str) -> Optional[Order]:
         """Get order status by ID."""
         try:
+            self._ensure_event_loop()
             if not self._connected:
                 self.connect()
             
@@ -280,6 +291,7 @@ class IBKRBroker(BaseBroker):
     def get_orders_history(self, limit: int = 50) -> List[Order]:
         """Get recent order history from IBKR."""
         try:
+            self._ensure_event_loop()
             if not self._connected:
                 self.connect()
             
@@ -307,6 +319,7 @@ class IBKRBroker(BaseBroker):
     def cancel_order(self, order_id: str) -> bool:
         """Cancel an order."""
         try:
+            self._ensure_event_loop()
             if not self._connected:
                 self.connect()
             
