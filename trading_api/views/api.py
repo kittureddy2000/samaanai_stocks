@@ -513,16 +513,75 @@ class IndicatorsView(APIView):
             return Response({'error': str(e), 'indicators': []}, status=500)
 
 
+class TestTradeView(APIView):
+    """Execute a test trade to verify trading functionality."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        """Place a small test trade.
+
+        Body: {"symbol": "AAPL", "action": "BUY", "quantity": 1}
+        """
+        try:
+            symbol = request.data.get('symbol', 'AAPL')
+            action = request.data.get('action', 'BUY').upper()
+            quantity = int(request.data.get('quantity', 1))
+
+            if action not in ['BUY', 'SELL']:
+                return Response({'error': 'Action must be BUY or SELL'}, status=400)
+
+            if quantity < 1 or quantity > 10:
+                return Response({'error': 'Quantity must be between 1 and 10 for test trades'}, status=400)
+
+            from trading_api.services import get_broker
+            broker = get_broker()
+
+            logger.info(f"TEST TRADE: {action} {quantity} {symbol}")
+
+            # Place market order
+            order = broker.place_market_order(
+                symbol=symbol,
+                qty=quantity,
+                side=action.lower()
+            )
+
+            if order:
+                logger.info(f"TEST TRADE SUCCESS: Order ID {order.id}, Status: {order.status}")
+                return Response({
+                    'status': 'success',
+                    'message': f'Test trade executed: {action} {quantity} {symbol}',
+                    'order': {
+                        'id': order.id,
+                        'symbol': order.symbol,
+                        'side': order.side,
+                        'qty': order.qty,
+                        'status': order.status,
+                        'filled_qty': order.filled_qty,
+                        'filled_price': order.filled_price,
+                    }
+                })
+            else:
+                return Response({
+                    'status': 'failed',
+                    'message': 'Order placement returned None'
+                }, status=500)
+
+        except Exception as e:
+            logger.error(f"Test trade error: {e}", exc_info=True)
+            return Response({'status': 'error', 'message': str(e)}, status=500)
+
+
 class AnalyzeView(APIView):
     """Run trading analysis cycle - triggered by Cloud Scheduler."""
-    
+
     permission_classes = [AllowAny]  # Called by Cloud Scheduler
-    
+
     def post(self, request):
         try:
             from trading_api.services import (
-                get_trading_analyst, 
-                get_order_manager, 
+                get_trading_analyst,
+                get_order_manager,
                 get_slack
             )
             TradingAnalyst = get_trading_analyst()

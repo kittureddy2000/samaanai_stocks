@@ -30,4 +30,7 @@ urlpatterns = [
     
     # Trigger analysis (for Cloud Scheduler)
     path('analyze', api.AnalyzeView.as_view(), name='api-analyze'),
+
+    # Test trade endpoint (for testing trading functionality)
+    path('test-trade', api.TestTradeView.as_view(), name='api-test-trade'),
 ]
