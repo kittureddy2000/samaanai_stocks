@@ -131,41 +131,57 @@ class RiskManager:
         }
     
     def _get_estimated_price(
-        self, 
-        symbol: str, 
-        positions: List[Dict[str, Any]]
+        self,
+        symbol: str,
+        positions: List
     ) -> Optional[float]:
         """Get estimated price from positions or return None.
-        
+
         Args:
             symbol: Stock symbol
-            positions: List of current positions
-            
+            positions: List of current positions (dict or Position dataclass)
+
         Returns:
             Current price if in positions, else None
         """
         for pos in positions:
-            if pos['symbol'] == symbol:
-                return pos.get('current_price')
+            # Handle both dict and Position dataclass
+            if hasattr(pos, 'symbol'):
+                pos_symbol = pos.symbol
+                current_price = pos.current_price
+            else:
+                pos_symbol = pos['symbol']
+                current_price = pos.get('current_price')
+
+            if pos_symbol == symbol:
+                return current_price
         return None
-    
+
     def _get_position_quantity(
         self,
         symbol: str,
-        positions: List[Dict[str, Any]]
+        positions: List
     ) -> float:
         """Get quantity held for a symbol.
-        
+
         Args:
             symbol: Stock symbol
-            positions: List of current positions
-            
+            positions: List of current positions (dict or Position dataclass)
+
         Returns:
             Quantity held (0 if no position)
         """
         for pos in positions:
-            if pos['symbol'] == symbol:
-                return pos.get('qty', 0)
+            # Handle both dict and Position dataclass
+            if hasattr(pos, 'symbol'):
+                pos_symbol = pos.symbol
+                qty = pos.qty
+            else:
+                pos_symbol = pos['symbol']
+                qty = pos.get('qty', 0)
+
+            if pos_symbol == symbol:
+                return qty
         return 0
     
     def record_trade_result(self, realized_pl: float):
