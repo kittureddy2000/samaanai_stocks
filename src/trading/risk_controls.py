@@ -32,30 +32,37 @@ class RiskManager:
     def check_trade(
         self,
         decision: TradeDecision,
-        account: Dict[str, Any],
+        account,
         current_positions: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Validate a trade against risk controls.
-        
+
         Args:
             decision: The trade decision to validate
-            account: Current account info
+            account: Current account info (dict or AccountInfo dataclass)
             current_positions: List of current positions
-            
+
         Returns:
             Dictionary with 'approved' boolean and 'reason' string
         """
         self._reset_daily_counters()
-        
+
         # Check kill switch
         if self.kill_switch_active:
             return {
                 'approved': False,
                 'reason': 'Kill switch is active - all trading halted'
             }
-        
-        portfolio_value = account.get('portfolio_value', 0)
-        cash = account.get('cash', 0)
+
+        # Handle both dict and dataclass account types
+        if hasattr(account, 'portfolio_value'):
+            # AccountInfo dataclass
+            portfolio_value = account.portfolio_value
+            cash = account.cash
+        else:
+            # Dict
+            portfolio_value = account.get('portfolio_value', 0)
+            cash = account.get('cash', 0)
         
         # Check 1: Confidence threshold
         if decision.confidence < config.trading.min_confidence:
@@ -108,11 +115,14 @@ class RiskManager:
                 }
         
         # Check 5: Pattern Day Trading warning (not blocking, just logging)
-        if account.get('daytrade_count', 0) >= 3:
-            logger.warning(
-                f"PDT Warning: {account['daytrade_count']} day trades this week. "
-                f"PDT flag: {account.get('pattern_day_trader', False)}"
-            )
+        # Note: IBKR AccountInfo doesn't provide PDT info, so we check if it's a dict
+        if isinstance(account, dict):
+            daytrade_count = account.get('daytrade_count', 0)
+            if daytrade_count >= 3:
+                logger.warning(
+                    f"PDT Warning: {daytrade_count} day trades this week. "
+                    f"PDT flag: {account.get('pattern_day_trader', False)}"
+                )
         
         # All checks passed
         return {
@@ -185,18 +195,22 @@ class RiskManager:
         self.kill_switch_active = False
         logger.info("✅ Kill switch deactivated - trading resumed")
     
-    def get_risk_status(self, account: Dict[str, Any]) -> Dict[str, Any]:
+    def get_risk_status(self, account) -> Dict[str, Any]:
         """Get current risk status.
-        
+
         Args:
-            account: Current account info
-            
+            account: Current account info (dict or AccountInfo dataclass)
+
         Returns:
             Risk status dictionary
         """
         self._reset_daily_counters()
-        
-        portfolio_value = account.get('portfolio_value', 0)
+
+        # Handle both dict and dataclass account types
+        if hasattr(account, 'portfolio_value'):
+            portfolio_value = account.portfolio_value
+        else:
+            portfolio_value = account.get('portfolio_value', 0)
         max_daily_loss = portfolio_value * config.trading.max_daily_loss_pct
         daily_loss_pct = (self.daily_loss / portfolio_value * 100) if portfolio_value > 0 else 0
         
@@ -222,12 +236,12 @@ class RiskManager:
             'min_confidence': config.trading.min_confidence
         }
     
-    def format_risk_display(self, account: Dict[str, Any]) -> str:
+    def format_risk_display(self, account) -> str:
         """Format risk status for display.
-        
+
         Args:
-            account: Current account info
-            
+            account: Current account info (dict or AccountInfo dataclass)
+
         Returns:
             Formatted string
         """
