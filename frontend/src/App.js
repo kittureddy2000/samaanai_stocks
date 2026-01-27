@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import {
     getPortfolio,
@@ -245,6 +245,20 @@ function Dashboard({ user, onLogout }) {
     const [brokerStatus, setBrokerStatus] = useState(null);
     const [lastUpdated, setLastUpdated] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+    const profileRef = useRef(null);
+
+    // Close dropdown when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (profileRef.current && !profileRef.current.contains(event.target)) {
+                setProfileMenuOpen(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
 
     const fetchData = useCallback(async () => {
         try {
@@ -325,10 +339,55 @@ function Dashboard({ user, onLogout }) {
                 <div className="header-right">
                     <span className="last-updated">Last updated: {lastUpdated || '--:--'}</span>
                     <button className="btn-refresh" onClick={fetchData}>🔄 Refresh</button>
-                    <div className="user-profile">
-                        {user.picture && <img src={user.picture} alt="profile" className="user-avatar" />}
-                        <span className="user-name">{user.name || user.email}</span>
-                        <button onClick={handleLogout} className="btn-logout">Logout</button>
+                    <div className="user-profile-container" ref={profileRef}>
+                        <button
+                            className="profile-trigger"
+                            onClick={() => setProfileMenuOpen(!profileMenuOpen)}
+                        >
+                            {user.picture && <img src={user.picture} alt="profile" className="user-avatar" />}
+                            <span className="user-name">{user.name || user.email}</span>
+                            <span className={`dropdown-arrow ${profileMenuOpen ? 'open' : ''}`}>▼</span>
+                        </button>
+                        {profileMenuOpen && (
+                            <div className="profile-dropdown">
+                                <div className="dropdown-header">
+                                    <span className="dropdown-email">{user.email}</span>
+                                </div>
+                                <div className="dropdown-section">
+                                    <div className="dropdown-section-title">⚙️ Agent Configuration</div>
+                                    <div className="config-dropdown-grid">
+                                        <div className="config-dropdown-item">
+                                            <span className="label">Analysis Interval</span>
+                                            <span className="value">{config?.analysis_interval || 30} min</span>
+                                        </div>
+                                        <div className="config-dropdown-item">
+                                            <span className="label">Max Position %</span>
+                                            <span className="value">{config?.max_position_pct || 10}%</span>
+                                        </div>
+                                        <div className="config-dropdown-item">
+                                            <span className="label">Max Daily Loss</span>
+                                            <span className="value">{config?.max_daily_loss_pct || 3}%</span>
+                                        </div>
+                                        <div className="config-dropdown-item">
+                                            <span className="label">Min Confidence</span>
+                                            <span className="value">{config?.min_confidence || 70}%</span>
+                                        </div>
+                                        <div className="config-dropdown-item">
+                                            <span className="label">Stop Loss</span>
+                                            <span className="value">{config?.stop_loss_pct || 5}%</span>
+                                        </div>
+                                        <div className="config-dropdown-item">
+                                            <span className="label">Take Profit</span>
+                                            <span className="value">{config?.take_profit_pct || 10}%</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="dropdown-divider"></div>
+                                <button onClick={handleLogout} className="dropdown-logout">
+                                    Logout
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
             </header>
@@ -513,37 +572,6 @@ function Dashboard({ user, onLogout }) {
                         {watchlist.length > 12 && (
                             <div className="watchlist-more">+{watchlist.length - 12} more</div>
                         )}
-                    </div>
-                </div>
-
-                {/* Config Card */}
-                <div className="card config-card">
-                    <h2>⚙️ Agent Configuration</h2>
-                    <div className="config-grid">
-                        <div className="config-item">
-                            <span className="label">Analysis Interval</span>
-                            <span className="value">{config?.analysis_interval || 30} min</span>
-                        </div>
-                        <div className="config-item">
-                            <span className="label">Max Position %</span>
-                            <span className="value">{config?.max_position_pct || 10}%</span>
-                        </div>
-                        <div className="config-item">
-                            <span className="label">Max Daily Loss</span>
-                            <span className="value">{config?.max_daily_loss_pct || 3}%</span>
-                        </div>
-                        <div className="config-item">
-                            <span className="label">Min Confidence</span>
-                            <span className="value">{config?.min_confidence || 70}%</span>
-                        </div>
-                        <div className="config-item">
-                            <span className="label">Stop Loss</span>
-                            <span className="value">{config?.stop_loss_pct || 5}%</span>
-                        </div>
-                        <div className="config-item">
-                            <span className="label">Take Profit</span>
-                            <span className="value">{config?.take_profit_pct || 10}%</span>
-                        </div>
                     </div>
                 </div>
 

@@ -65,7 +65,16 @@ class IBKRBroker(BaseBroker):
         self.ib = self.IB()
         self.host = os.environ.get('IBKR_GATEWAY_HOST', '127.0.0.1')
         self.port = int(os.environ.get('IBKR_GATEWAY_PORT', '4002'))  # 4001=live, 4002=paper
-        self.client_id = int(os.environ.get('IBKR_CLIENT_ID', '1'))
+        # Use random client ID to avoid conflicts between multiple Cloud Run instances
+        # Each instance gets a unique client ID in range 100-999 to prevent
+        # "Error 326: client id is already in use" errors
+        import random
+        base_client_id = int(os.environ.get('IBKR_CLIENT_ID', '1'))
+        if base_client_id == 1:
+            # Generate random client ID if using default
+            self.client_id = random.randint(100, 999)
+        else:
+            self.client_id = base_client_id
         self._connected = False
 
         logger.info(f"IBKRBroker initialized: host={self.host}, port={self.port}, client_id={self.client_id}")

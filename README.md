@@ -2,16 +2,16 @@
 
 An AI-powered stock trading agent that uses **Google Gemini** to analyze market data and make automated trading decisions. Supports **Alpaca** (paper trading) and **Interactive Brokers** (live/paper).
 
-## 🚀 Live Demo
+## Live Demo
 
 | Environment | Dashboard | API |
 |-------------|-----------|-----|
-| **Staging** | https://stg.trading.samaanai.com | https://trading-api-staging-*.run.app |
-| **Production** | https://trading.samaanai.com | https://trading-api-*.run.app |
+| **Staging** | https://stg.trading.samaanai.com | https://trading-api-staging-hdp6ioqupa-uw.a.run.app |
+| **Production** | https://trading.samaanai.com | https://trading-api-hdp6ioqupa-uw.a.run.app |
 
 ---
 
-## 📐 Technology Stack
+## Technology Stack
 
 ### Frontend
 | Technology | Version | Purpose |
@@ -40,22 +40,74 @@ An AI-powered stock trading agent that uses **Google Gemini** to analyze market 
 | Docker Compose | Local Development |
 | Google Cloud Run | Production Runtime |
 | Google Cloud SQL | Managed PostgreSQL |
-| Google Compute Engine | IB Gateway VM (~$3/month) |
+| Google Compute Engine | IB Gateway VM |
+| Google VPC Connector | Private network access to IB Gateway |
+| Google Cloud Scheduler | Automated trading triggers |
 | GitHub Actions | CI/CD Pipelines |
 | Nginx | Frontend Static Server |
 
 ### External APIs & Brokers
 | Service | Purpose |
 |---------|---------|
-| **Alpaca** | Paper Trading & Market Data (Default) |
-| **Interactive Brokers** | Live/Paper Trading (Optional) |
+| **Interactive Brokers** | Live/Paper Trading (Primary) |
+| **Alpaca** | Paper Trading & Market Data (Fallback) |
 | Google Gemini | LLM Analysis |
 | NewsAPI | Sentiment Analysis (Optional) |
 | Slack | Trade Notifications (Optional) |
 
 ---
 
-## 📁 Project Structure
+## System Architecture
+
+```
+                                   CLOUD SCHEDULER
+                              (Every 30 min, market hours)
+                                        |
+                                        v
++------------------+              POST /api/analyze
+|   USER BROWSER   |                    |
+|  (Dashboard UI)  |                    v
++--------+---------+        +------------------------+
+         |                  |      CLOUD RUN         |
+         | HTTPS            |   (Django Backend)     |
+         v                  |                        |
++------------------+        |  +------------------+  |
+| CLOUD RUN        |<------>|  | Trading Logic    |  |
+| (React Frontend) |  API   |  | - LLM Analyst    |  |
++------------------+        |  | - Risk Manager   |  |
+                            |  | - Order Manager  |  |
+                            |  +--------+---------+  |
+                            |           |            |
+                            +-----------|------------+
+                                        |
+                    +-------------------+-------------------+
+                    |                   |                   |
+                    v                   v                   v
+          +------------------+  +---------------+  +------------------+
+          |   CLOUD SQL      |  | GOOGLE GEMINI |  |   IB GATEWAY     |
+          |   (PostgreSQL)   |  |  (LLM API)    |  |   (GCE VM)       |
+          | - Trade history  |  | - Analysis    |  | - Order execution|
+          | - User accounts  |  | - Decisions   |  | - Market data    |
+          +------------------+  +---------------+  +------------------+
+                                                           |
+                                                   VPC CONNECTOR
+                                                   (10.8.0.0/28)
+```
+
+### Data Flow
+
+1. **Cloud Scheduler** triggers analysis every 30 minutes during market hours (9:30 AM - 4:00 PM ET)
+2. **Django Backend** receives the trigger and initiates analysis
+3. **Market Data** is fetched from IBKR (or Alpaca as fallback)
+4. **Technical Indicators** calculate RSI, MACD, Bollinger Bands, etc.
+5. **Gemini LLM** analyzes data and recommends trades with confidence scores
+6. **Risk Controls** validate trades against position limits and daily loss caps
+7. **Order Manager** executes approved trades via IBKR API
+8. **Dashboard** displays real-time portfolio, positions, and trade history
+
+---
+
+## Project Structure
 
 ```
 Stock Trading/
@@ -94,7 +146,9 @@ Stock Trading/
 │   │   ├── analyst.py          # Trading analysis
 │   │   └── llm_client.py       # Gemini API client
 │   ├── trading/                # Trade execution
+│   │   ├── ibkr_broker.py      # IBKR API wrapper
 │   │   ├── alpaca_client.py    # Alpaca API wrapper
+│   │   ├── broker_factory.py   # Broker selection
 │   │   ├── order_manager.py    # Order execution
 │   │   ├── portfolio.py        # Portfolio tracking
 │   │   └── risk_controls.py    # Risk management
@@ -103,13 +157,14 @@ Stock Trading/
 │       └── technical_indicators.py
 │
 ├── scripts/                     # Utility scripts
-│   └── migrate_data.py         # SQLite → PostgreSQL migration
+│   └── migrate_data.py         # SQLite -> PostgreSQL migration
 │
 ├── .github/workflows/           # CI/CD
 │   ├── deploy-staging.yml      # Auto-deploy on push to staging
 │   └── deploy-production.yml   # Auto-deploy on push to main
 │
 ├── docker-compose.yml           # Local development
+├── docker-compose.debug.yml     # Local IBKR testing
 ├── Dockerfile                   # Backend container
 ├── requirements.txt             # Python dependencies
 └── README.md
@@ -117,100 +172,213 @@ Stock Trading/
 
 ---
 
-## 📊 System Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           LLM TRADING AGENT                                 │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                    CLOUD SCHEDULER (Every 15 min)                    │   │
-│  │                   POST /api/analyze during market hours              │   │
-│  └──────────────────────────────┬──────────────────────────────────────┘   │
-│                                 │                                           │
-│         ┌───────────────────────┼───────────────────────┐                  │
-│         ▼                       ▼                       ▼                  │
-│  ┌─────────────┐        ┌─────────────┐        ┌─────────────┐            │
-│  │   DATA      │        │   GEMINI    │        │   EXECUTION │            │
-│  │   LAYER     │───────▶│   BRAIN     │───────▶│   ENGINE    │            │
-│  └─────────────┘        └─────────────┘        └─────────────┘            │
-│         │                      │                      │                    │
-│  ┌─────────────┐        ┌─────────────┐        ┌─────────────┐            │
-│  │ • Alpaca IEX│        │ • Analysis  │        │ • Order     │            │
-│  │ • yfinance  │        │ • Strategy  │        │   Manager   │            │
-│  │   (fallback)│        │ • Retry     │        │ • Risk Ctrl │            │
-│  │ • Technical │        │   Logic     │        │ • Portfolio │            │
-│  │   Indicators│        │ • Decisions │        │             │            │
-│  └─────────────┘        └─────────────┘        └─────────────┘            │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-          ┌─────────────────────────┼─────────────────────────┐
-          ▼                         ▼                         ▼
-┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
-│   ALPACA API     │    │   GOOGLE GEMINI  │    │   REACT DASH     │
-│ Trading & Data   │    │   LLM Analysis   │    │   Port 80 (Nginx)│
-└──────────────────┘    └──────────────────┘    └──────────────────┘
-```
-
-### Data Flow
-
-1. **Cloud Scheduler** triggers analysis every 15 minutes during market hours
-2. **Data Layer** fetches market data from Alpaca (with yfinance fallback)
-3. **Technical Indicators** calculate RSI, MACD, Bollinger Bands, etc.
-4. **Gemini LLM** analyzes data and recommends trades with confidence scores
-5. **Risk Controls** validate trades against position limits and daily loss caps
-6. **Order Manager** executes approved trades via Alpaca API
-7. **Dashboard** displays real-time portfolio, positions, and trade history
-
----
-
-## 🔧 Configuration
+## Configuration
 
 ### Environment Variables
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `ALPACA_API_KEY` | Alpaca paper trading API key | ✅ |
-| `ALPACA_SECRET_KEY` | Alpaca API secret | ✅ |
-| `GEMINI_API_KEY` | Google Gemini API key | ✅ |
-| `DJANGO_SECRET_KEY` | Django secret key for sessions | ✅ |
-| `GOOGLE_CLIENT_ID` | OAuth client ID | For auth |
-| `GOOGLE_CLIENT_SECRET` | OAuth client secret | For auth |
-| `DB_PASSWORD` | Cloud SQL password | For prod |
-| `NEWS_API_KEY` | NewsAPI key for sentiment | Optional |
-| `SLACK_WEBHOOK_URL` | Slack notifications | Optional |
+#### Required for All Environments
 
-### Trading Configuration
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `DJANGO_SECRET_KEY` | Django secret key for sessions | `your-secret-key` |
+| `GEMINI_API_KEY` | Google Gemini API key | `AIzaSy...` |
 
-Set via environment variables:
+#### Broker Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `BROKER_TYPE` | Broker to use (`ibkr` or `alpaca`) | `alpaca` |
+| `IBKR_GATEWAY_HOST` | IB Gateway IP address | `127.0.0.1` |
+| `IBKR_GATEWAY_PORT` | IB Gateway port (use **4004** for socat proxy) | `4004` |
+| `IBKR_CLIENT_ID` | IBKR client ID | `1` |
+| `ALPACA_API_KEY` | Alpaca API key (if using Alpaca) | - |
+| `ALPACA_SECRET_KEY` | Alpaca secret key | - |
+
+#### OAuth & Authentication
+
+| Variable | Description |
+|----------|-------------|
+| `GOOGLE_CLIENT_ID` | OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | OAuth client secret |
+| `AUTHORIZED_EMAILS` | Comma-separated allowed emails |
+| `FRONTEND_URL` | Frontend URL for OAuth redirects |
+
+#### Database (Production)
+
+| Variable | Description |
+|----------|-------------|
+| `DB_USER` | Cloud SQL username |
+| `DB_PASSWORD` | Cloud SQL password |
+| `DB_NAME` | Database name |
+| `INSTANCE_CONNECTION_NAME` | Cloud SQL instance connection name |
+
+#### Optional
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `TRADING_STRATEGY` | balanced | aggressive, balanced, conservative |
-| `ANALYSIS_INTERVAL` | 15 | Minutes between analyses |
-| `MAX_POSITION_PCT` | 0.10 | Max 10% per position |
-| `MAX_DAILY_LOSS_PCT` | 0.03 | Max 3% daily loss |
-| `MIN_CONFIDENCE` | 0.70 | Min 70% LLM confidence |
-| `STOP_LOSS_PCT` | 0.05 | 5% stop loss |
-| `TAKE_PROFIT_PCT` | 0.10 | 10% take profit |
+| `NEWS_API_KEY` | - | NewsAPI key for sentiment |
+| `SLACK_WEBHOOK_URL` | - | Slack notifications |
+| `TRADING_STRATEGY` | `balanced` | aggressive, balanced, conservative |
+| `ANALYSIS_INTERVAL` | `15` | Minutes between analyses |
+| `MAX_POSITION_PCT` | `0.10` | Max 10% per position |
+| `MAX_DAILY_LOSS_PCT` | `0.03` | Max 3% daily loss |
+| `MIN_CONFIDENCE` | `0.70` | Min 70% LLM confidence |
+| `STOP_LOSS_PCT` | `0.05` | 5% stop loss |
+| `TAKE_PROFIT_PCT` | `0.10` | 10% take profit |
 
 ---
 
-## 🚀 Local Development
+## Interactive Brokers Integration
+
+### Architecture
+
+```
+Cloud Run (Django) ──VPC Connector──> GCE VM (10.138.0.3:4004)
+                                              │
+                                        socat proxy (4004 → localhost:4002)
+                                              │
+                                    Docker Container (ib-gateway)
+                                              │
+                                              v
+                                       IBKR Servers
+
+NOTE: Port 4004 uses a socat proxy inside the container that forwards to localhost:4002.
+This bypasses the TrustedIPs restriction since the gateway sees connections from localhost.
+```
+
+### IB Gateway VM Details
+
+| Component | Value |
+|-----------|-------|
+| **VM Name** | `ibkr-gateway` |
+| **Zone** | `us-west1-b` |
+| **Machine Type** | e2-small (Spot) |
+| **Internal IP** | `10.138.0.3` |
+| **Container** | `ghcr.io/gnzsnz/ib-gateway:stable` |
+| **Trading Mode** | Paper (account DUO726424) |
+| **VPC Connector** | `ibkr-connector` (10.8.0.0/28) |
+
+### Docker Container Configuration
+
+The IB Gateway runs in a Docker container with automatic login via IBC (IB Controller):
+
+```bash
+docker run -d --name ibgateway --restart=always \
+  -p 4001:4001 -p 4002:4002 \
+  -e TWS_USERID=YOUR_IBKR_USERNAME \
+  -e TWS_PASSWORD=YOUR_IBKR_PASSWORD \
+  -e TRADING_MODE=paper \
+  -e READ_ONLY_API=no \
+  -e IBC_TrustedTwsApiClientIPs=0.0.0.0/0 \
+  -e ACCEPT_INCOMING_CONNECTION=accept \
+  ghcr.io/gnzsnz/ib-gateway:stable
+```
+
+### Important: TrustedIPs Configuration
+
+The IB Gateway must be configured to accept connections from the VPC connector IP range. Set the environment variable:
+
+```
+IBC_TrustedTwsApiClientIPs=0.0.0.0/0
+```
+
+If the jts.ini file has `TrustedIPs=127.0.0.1`, connections from Cloud Run will be rejected.
+
+### VM Management Commands
+
+```bash
+# SSH into IB Gateway VM
+gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap
+
+# View container logs
+gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap \
+  --command='docker logs -f ibgateway'
+
+# Check container status
+gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap \
+  --command='docker ps'
+
+# Restart container with correct config
+gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap \
+  --command='docker stop ibgateway && docker rm ibgateway && \
+    docker run -d --name ibgateway --restart=always \
+    -p 4001:4001 -p 4002:4002 \
+    -e TWS_USERID=YOUR_USERNAME \
+    -e TWS_PASSWORD=YOUR_PASSWORD \
+    -e TRADING_MODE=paper \
+    -e READ_ONLY_API=no \
+    -e IBC_TrustedTwsApiClientIPs=0.0.0.0/0 \
+    -e ACCEPT_INCOMING_CONNECTION=accept \
+    ghcr.io/gnzsnz/ib-gateway:stable'
+
+# Start VM if stopped (spot preemption)
+gcloud compute instances start ibkr-gateway --zone=us-west1-b
+```
+
+### Monthly Infrastructure Costs
+
+| Resource | Cost |
+|----------|------|
+| GCE VM (e2-small spot) | ~$6 |
+| VPC Connector | ~$7 |
+| Cloud Run (backend) | ~$0-5 |
+| Cloud Run (frontend) | ~$0-2 |
+| Cloud SQL (db-f1-micro) | ~$8 |
+| **Total** | **~$21-28/month** |
+
+---
+
+## Cloud Scheduler Configuration
+
+The trading agent runs automatically during market hours via Cloud Scheduler:
+
+```
+Schedule: */30 9-16 * * 1-5 (America/New_York)
+Target: POST https://trading-api-staging-hdp6ioqupa-uw.a.run.app/api/analyze
+```
+
+### Current Schedule
+
+| Job Name | Schedule | Description |
+|----------|----------|-------------|
+| `trading-agent-trigger` | Every 30 min, 9am-4pm ET, Mon-Fri | Triggers LLM analysis |
+
+### Managing the Scheduler
+
+```bash
+# List scheduled jobs
+gcloud scheduler jobs list --location=us-central1
+
+# Pause trading
+gcloud scheduler jobs pause trading-agent-trigger --location=us-central1
+
+# Resume trading
+gcloud scheduler jobs resume trading-agent-trigger --location=us-central1
+
+# Manual trigger
+gcloud scheduler jobs run trading-agent-trigger --location=us-central1
+
+# Update schedule (e.g., every 15 minutes)
+gcloud scheduler jobs update http trading-agent-trigger \
+  --location=us-central1 \
+  --schedule="*/15 9-16 * * 1-5"
+```
+
+---
+
+## Local Development
 
 ### Prerequisites
 
 - Python 3.10+
 - Node.js 18+
-- Docker & Docker Compose (optional)
+- Docker & Docker Compose
 
 ### Backend Setup
 
 ```bash
 # Clone and setup
-cd "/Users/krishnayadamakanti/Documents/Stock Trading"
+cd "/path/to/Stock Trading"
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -238,14 +406,28 @@ npm start
 ### Docker Compose (Full Stack)
 
 ```bash
+# Standard development
 docker-compose up --build
-# Backend: http://localhost:8000
-# Frontend: http://localhost:3000
+
+# With local IBKR testing
+docker-compose -f docker-compose.debug.yml up --build
+```
+
+### Testing IBKR Locally
+
+For local IBKR testing, use the debug compose file which includes an IB Gateway container:
+
+```bash
+# Start IB Gateway + Backend
+docker-compose -f docker-compose.debug.yml up --build
+
+# VNC to IB Gateway for manual login (if needed)
+# Connect to localhost:5900, password: 123456
 ```
 
 ---
 
-## ☁️ Cloud Deployment
+## Cloud Deployment
 
 ### CI/CD Pipeline
 
@@ -256,21 +438,28 @@ docker-compose up --build
 
 ### GitHub Secrets Required
 
-Add these to your repository Settings → Secrets:
+Add these to Repository Settings > Secrets and variables > Actions:
 
-**Shared:**
-- `GCP_SA_KEY` - GCP Service Account JSON (staging)
-- `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`
-- `GEMINI_API_KEY`
-- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
-- `DJANGO_SECRET_KEY`
-- `DB_PASSWORD`
+#### Secrets
 
-**Production-specific:**
-- `GCP_SA_KEY_PROD` - GCP Service Account JSON (production)
-- `ALPACA_API_KEY_PROD`, `ALPACA_SECRET_KEY_PROD` (if different)
-- `DJANGO_SECRET_KEY_PROD`
-- `DB_PASSWORD_PROD`
+| Secret | Description |
+|--------|-------------|
+| `GCP_SA_KEY` | GCP Service Account JSON (staging) |
+| `GCP_SA_KEY_PROD` | GCP Service Account JSON (production) |
+| `DJANGO_SECRET_KEY` | Django secret key |
+| `DJANGO_SECRET_KEY_PROD` | Django secret key (production) |
+| `DB_PASSWORD` | Cloud SQL password (staging) |
+| `DB_PASSWORD_PROD` | Cloud SQL password (production) |
+| `GEMINI_API_KEY` | Google Gemini API key |
+| `NEWS_API_KEY` | NewsAPI key |
+| `GOOGLE_CLIENT_ID` | OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | OAuth client secret |
+
+#### Variables
+
+| Variable | Description |
+|----------|-------------|
+| `AUTHORIZED_EMAILS` | Comma-separated allowed emails |
 
 ### Deploy to Staging
 
@@ -293,57 +482,94 @@ git push origin main
 
 ---
 
-## 🔄 Production Migration Checklist
+## Production Deployment Checklist
 
-When ready to go to production:
+### 1. Create GCP Resources
 
-1. **Create Production Cloud SQL Instance** (if not exists)
-   ```bash
-   gcloud sql instances create samaanai-backend-db \
-     --database-version=POSTGRES_14 \
-     --tier=db-f1-micro \
-     --region=us-west1
-   ```
+```bash
+# Set project
+gcloud config set project YOUR_PROD_PROJECT
 
-2. **Create Database and User**
-   ```bash
-   gcloud sql databases create stock_trading --instance=samaanai-backend-db
-   gcloud sql users create samaanai_backend --instance=samaanai-backend-db \
-     --password=YOUR_PASSWORD
-   ```
+# Create Cloud SQL instance
+gcloud sql instances create trading-db \
+  --database-version=POSTGRES_14 \
+  --tier=db-f1-micro \
+  --region=us-west1
 
-3. **Add Production Secrets to GitHub**
-   - `GCP_SA_KEY_PROD`
-   - `DJANGO_SECRET_KEY_PROD`
-   - `DB_PASSWORD_PROD`
-   - `ALPACA_API_KEY_PROD` (live trading keys if different)
+# Create database and user
+gcloud sql databases create stock_trading --instance=trading-db
+gcloud sql users create samaanai_backend --instance=trading-db \
+  --password=YOUR_PASSWORD
 
-4. **Run Migrations on Production**
-   ```bash
-   # Connect to Cloud Run and run migrations
-   # Or include in Dockerfile startup
-   ```
+# Create VPC Connector (for IBKR)
+gcloud compute networks vpc-access connectors create ibkr-connector \
+  --region=us-west1 \
+  --network=default \
+  --range=10.8.0.0/28
+```
 
-5. **Migrate Data (if needed)**
-   ```bash
-   # Use Cloud SQL Proxy
-   cloud_sql_proxy -instances=samaanai-prod:us-west1:samaanai-backend-db=tcp:5432
-   
-   export DB_HOST=127.0.0.1
-   export DB_PASSWORD=your_prod_password
-   python scripts/migrate_data.py
-   ```
+### 2. Create IB Gateway VM
 
-6. **Push to main branch**
-   ```bash
-   git checkout main
-   git merge staging
-   git push origin main
-   ```
+```bash
+# Create VM
+gcloud compute instances create ibkr-gateway \
+  --zone=us-west1-b \
+  --machine-type=e2-small \
+  --provisioning-model=SPOT \
+  --tags=ibkr-gateway \
+  --image-family=cos-stable \
+  --image-project=cos-cloud
+
+# Create firewall rule for VPC connector
+gcloud compute firewall-rules create allow-vpc-to-ibkr \
+  --source-ranges=10.8.0.0/28 \
+  --target-tags=ibkr-gateway \
+  --allow=tcp:4001,tcp:4002
+
+# SSH and start container
+gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap
+# Then run docker command from IBKR section above
+```
+
+### 3. Configure Cloud Scheduler
+
+```bash
+# Create scheduler job
+gcloud scheduler jobs create http trading-agent-trigger \
+  --location=us-central1 \
+  --schedule="*/30 9-16 * * 1-5" \
+  --time-zone="America/New_York" \
+  --uri="https://YOUR_BACKEND_URL/api/analyze" \
+  --http-method=POST
+```
+
+### 4. Add GitHub Secrets
+
+Add all required secrets to GitHub repository settings.
+
+### 5. Update Cloud Run Environment
+
+After first deployment, update IBKR settings:
+
+```bash
+gcloud run services update trading-api \
+  --region=us-west1 \
+  --update-env-vars="BROKER_TYPE=ibkr,IBKR_GATEWAY_HOST=VM_INTERNAL_IP,IBKR_GATEWAY_PORT=4002,FRONTEND_URL=https://your-domain.com"
+```
+
+### 6. Configure Domain Mapping (Optional)
+
+```bash
+# Map custom domain to frontend
+gcloud run domain-mappings create \
+  --service=trading-dashboard \
+  --domain=trading.yourdomain.com \
+  --region=us-west1
+```
 
 ---
 
-## 📊 API Endpoints
+## API Endpoints
 
 ### Authentication
 
@@ -360,6 +586,7 @@ When ready to go to production:
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Health check (no auth) |
+| `/api/broker-status` | GET | Broker connection diagnostics |
 | `/api/portfolio` | GET | Portfolio & positions |
 | `/api/risk` | GET | Risk status & limits |
 | `/api/market` | GET | Market open/close status |
@@ -371,7 +598,7 @@ When ready to go to production:
 
 ---
 
-## 🛡️ Risk Management
+## Risk Management
 
 | Control | Default | Description |
 |---------|---------|-------------|
@@ -384,30 +611,17 @@ When ready to go to production:
 
 ---
 
-## 📈 Technical Indicators
+## Troubleshooting
 
-| Indicator | Purpose |
-|-----------|---------|
-| **RSI (14)** | Overbought (>70) / Oversold (<30) detection |
-| **MACD** | Trend direction & momentum |
-| **SMA (20, 50)** | Medium-term trend |
-| **EMA (12, 26)** | Short-term trend |
-| **Bollinger Bands** | Volatility & price extremes |
-| **Stochastic** | Momentum oscillator |
-| **OBV** | Volume-based trend confirmation |
-| **ATR** | Volatility measurement |
-
----
-
-## 📋 Troubleshooting
+### Common Issues
 
 | Issue | Cause | Solution |
 |-------|-------|----------|
-| "429 RESOURCE_EXHAUSTED" | Gemini quota exceeded | Wait for daily reset or enable billing |
-| "503 UNAVAILABLE" | Gemini overloaded | Retry logic handles automatically |
-| "No historical data" | Alpaca IEX gap | yfinance fallback handles this |
-| No trades executing | LLM confidence < 70% | Normal - wait for better signals |
-| JWT token expired | Access token lifetime | Frontend auto-refreshes tokens |
+| "Connection refused" to IBKR | TrustedIPs=127.0.0.1 | Set `IBC_TrustedTwsApiClientIPs=0.0.0.0/0` |
+| IBKR port 4004 error | Wrong port configured | Use 4002 for paper, 4001 for live |
+| "429 RESOURCE_EXHAUSTED" | Gemini quota exceeded | Wait for daily reset |
+| OAuth redirect wrong URL | FRONTEND_URL misconfigured | Update Cloud Run env var |
+| VM stopped | Spot preemption | Run `gcloud compute instances start` |
 
 ### View Cloud Run Logs
 
@@ -416,155 +630,32 @@ When ready to go to production:
 gcloud logging read "resource.labels.service_name=trading-api-staging" \
   --project=samaanai-stg-1009-124126 --limit=50
 
-# Production
-gcloud logging read "resource.labels.service_name=trading-api" \
-  --project=samaanai-prod-1009-124126 --limit=50
+# Search for specific errors
+gcloud logging read "resource.labels.service_name=trading-api-staging AND textPayload:IBKR" \
+  --project=samaanai-stg-1009-124126 --limit=20
 ```
 
----
-
-## 🏦 Interactive Brokers Integration
-
-The system supports switching between Alpaca and Interactive Brokers via environment variable. IB Gateway runs as a Docker container on a GCE VM with **automatic login**.
-
-### Architecture
-
-```
-Cloud Run ──VPC Connector──► GCE VM (10.138.0.3:4002)
-     │                              │
-     │ HTTP/REST                    │ Docker Container
-     ▼                              ▼
-  Django API                  IB Gateway → IBKR Servers
-```
-
-### Broker Selection
+### Check IB Gateway Status
 
 ```bash
-# Use Alpaca (default)
-export BROKER_TYPE=alpaca
-
-# Use Interactive Brokers (already configured on Cloud Run)
-export BROKER_TYPE=ibkr
-export IBKR_GATEWAY_HOST=10.138.0.3    # VM internal IP
-export IBKR_GATEWAY_PORT=4002          # 4002=paper, 4001=live
-export IBKR_CLIENT_ID=1
-```
-
-### IB Gateway VM
-
-| Component | Details |
-|-----------|---------|
-| **VM Name** | `ibkr-gateway` |
-| **Zone** | `us-west1-b` |
-| **Machine Type** | e2-small (Spot) |
-| **Internal IP** | `10.138.0.3` |
-| **Container** | `ghcr.io/gnzsnz/ib-gateway:stable` |
-| **Trading Mode** | Paper (account DUO726424) |
-| **VPC Connector** | `ibkr-connector` |
-
-### Paper Trading Credentials
-*These are pre-configured in the deployment/script but documented here for reference.*
-
-*   **Username**: `kittureddy2000@gmail.com`
-*   **Password**: *(Check your password manager or ask admin)*
-*   **Paper Account**: `DUO726424`
-
-### Monthly Costs
-
-| Resource | Cost |
-|----------|------|
-| VM (e2-small spot) | ~$6 |
-| VPC Connector | ~$7 |
-| **Total** | **~$13/month** |
-
-### The Docker container handles login automatically!
-
-The IB Gateway Docker image (`ghcr.io/gnzsnz/ib-gateway`) includes IBC (IB Controller) which:
-- Automatically logs in using credentials passed via environment variables
-- Dismisses popups and warnings
-- Restarts the gateway if it crashes
-- No manual login required!
-
-### VM Management Commands
-
-```bash
-# SSH into IB Gateway VM (uses IAP tunnel)
-gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap
-
-# View container logs (live)
-gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap \
-  --command='docker logs -f ibgateway'
-
-# View recent logs
+# Container logs
 gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap \
   --command='docker logs ibgateway --tail 50'
 
-# Check container status
+# Port status
 gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap \
-  --command='docker ps'
+  --command='ss -tlnp | grep -E "4001|4002"'
 
-# Restart container
+# Environment variables
 gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap \
-  --command='docker restart ibgateway'
-
-# Check if port 4002 is listening
-gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap \
-  --command='ss -tlnp | grep 4002'
+  --command='docker inspect ibgateway --format "{{range .Config.Env}}{{println .}}{{end}}" | grep -E "IBC_|TWS_|TRADING"'
 ```
-
-### Updating IBKR Credentials
-
-```bash
-# Stop and remove old container
-gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap \
-  --command='docker stop ibgateway && docker rm ibgateway'
-
-# Start new container with updated credentials
-gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap \
-  --command='docker run -d --name ibgateway --restart=always \
-    -p 4001:4001 -p 4002:4002 \
-    -e TWS_USERID=YOUR_USERNAME \
-    -e TWS_PASSWORD=YOUR_PASSWORD \
-    -e TRADING_MODE=paper \
-    -e READ_ONLY_API=no \
-    ghcr.io/gnzsnz/ib-gateway:stable'
-```
-
-### Switching to Live Trading
-
-```bash
-# Update Cloud Run environment
-gcloud run services update samaanai-backend-staging \
-  --region=us-west1 \
-  --update-env-vars=IBKR_GATEWAY_PORT=4001
-
-# Restart container with live mode
-gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap \
-  --command='docker stop ibgateway && docker rm ibgateway && \
-    docker run -d --name ibgateway --restart=always \
-    -p 4001:4001 -p 4002:4002 \
-    -e TWS_USERID=YOUR_USERNAME \
-    -e TWS_PASSWORD=YOUR_PASSWORD \
-    -e TRADING_MODE=live \
-    -e READ_ONLY_API=no \
-    ghcr.io/gnzsnz/ib-gateway:stable'
-```
-
-### Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| Container not running | `docker restart ibgateway` |
-| Login failed | Check credentials in `docker logs ibgateway` |
-| Port not listening | Wait 30-60 seconds for gateway startup |
-| Connection timeout | Verify VPC connector: `gcloud compute networks vpc-access connectors list --region=us-west1` |
-| VM stopped (spot preemption) | `gcloud compute instances start ibkr-gateway --zone=us-west1-b` |
 
 ---
 
-## ⚠️ Important Notes
+## Important Notes
 
-1. **Paper Trading Only**: Default configuration uses Alpaca paper trading (no real money)
+1. **Paper Trading Only**: Default configuration uses IBKR paper trading (no real money)
 2. **Market Hours**: Agent only trades during market hours (9:30 AM - 4:00 PM ET, Mon-Fri)
 3. **Pattern Day Trading**: If using live trading with <$25k, be aware of PDT rules
 4. **No Guarantees**: AI trading is experimental. Past performance doesn't predict future results
@@ -572,6 +663,6 @@ gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap \
 
 ---
 
-## 📄 License
+## License
 
 MIT
