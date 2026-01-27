@@ -516,7 +516,7 @@ class IndicatorsView(APIView):
 class TestTradeView(APIView):
     """Execute a test trade to verify trading functionality."""
 
-    permission_classes = [AllowAny]  # Temporarily public for testing
+    permission_classes = [IsAuthenticated]
 
     def post(self, request):
         """Place a small test trade.
