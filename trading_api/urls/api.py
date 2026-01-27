@@ -33,4 +33,7 @@ urlpatterns = [
 
     # Test trade endpoint (for testing trading functionality)
     path('test-trade', api.TestTradeView.as_view(), name='api-test-trade'),
+
+    # Daily summary email (for Cloud Scheduler at market close)
+    path('daily-summary', api.DailySummaryView.as_view(), name='api-daily-summary'),
 ]

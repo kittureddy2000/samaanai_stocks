@@ -643,12 +643,94 @@ class AnalyzeView(APIView):
                 'status': 'success',
                 'trades_executed': len(executed),
                 'trades': [
-                    {'symbol': t.symbol, 'action': t.action, 'quantity': t.quantity} 
+                    {'symbol': t.symbol, 'action': t.action, 'quantity': t.quantity}
                     for t in valid_trades
                 ],
                 'analysis': response.analysis_summary
             })
-            
+
         except Exception as e:
             logger.error(f"Analysis error: {e}")
+            return Response({'status': 'error', 'message': str(e)}, status=500)
+
+
+class DailySummaryView(APIView):
+    """Send daily trading summary email - triggered by Cloud Scheduler at market close."""
+
+    permission_classes = [AllowAny]  # Called by Cloud Scheduler
+
+    def post(self, request):
+        try:
+            from datetime import date
+            from src.utils.email_notifier import send_daily_summary
+            from trading_api.services import get_slack
+
+            trading_client = get_trading_client()
+            risk_manager = get_risk_manager()
+
+            # Get portfolio data
+            account = trading_client.get_account()
+            positions = trading_client.get_positions()
+
+            if not account:
+                return Response({'status': 'error', 'message': 'Failed to get account'}, status=500)
+
+            # Calculate daily change
+            daily_change = account['equity'] - account['last_equity']
+            daily_change_pct = (daily_change / account['last_equity'] * 100) if account['last_equity'] > 0 else 0
+
+            portfolio = {
+                'portfolio_value': account['portfolio_value'],
+                'cash': account['cash'],
+                'equity': account['equity'],
+                'daily_change': daily_change,
+                'daily_change_pct': daily_change_pct,
+                'positions': positions,
+            }
+
+            # Get today's trades
+            orders = trading_client.get_orders_history(limit=50)
+            today = date.today().isoformat()
+            trades_today = []
+            for order in orders:
+                created = order.get('created_at', '')
+                if created and today in str(created):
+                    trades_today.append({
+                        'action': order.get('side', '').upper(),
+                        'symbol': order.get('symbol'),
+                        'quantity': order.get('qty'),
+                        'filled_price': order.get('filled_avg_price'),
+                        'created_at': created,
+                        'confidence': 0.8,  # Default, actual confidence not stored in order
+                    })
+
+            # Get risk status
+            risk_status = risk_manager.get_risk_status(account)
+
+            # Estimate analysis runs (based on scheduler: every 30 min from 9-4 = ~14 runs)
+            # For accurate count, we'd need to track in database
+            analysis_runs = 14  # Approximate
+
+            # Send email
+            email_sent = send_daily_summary(portfolio, trades_today, analysis_runs, risk_status)
+
+            # Also send to Slack
+            _, notify_portfolio = get_slack()
+            notify_portfolio({
+                'portfolio_value': portfolio['portfolio_value'],
+                'daily_change': daily_change,
+                'daily_change_pct': daily_change_pct,
+                'positions_count': len(positions),
+            })
+
+            return Response({
+                'status': 'success',
+                'email_sent': email_sent,
+                'portfolio_value': account['portfolio_value'],
+                'trades_today': len(trades_today),
+                'positions': len(positions),
+            })
+
+        except Exception as e:
+            logger.error(f"Daily summary error: {e}", exc_info=True)
             return Response({'status': 'error', 'message': str(e)}, status=500)
