@@ -334,34 +334,37 @@ class WatchlistView(APIView):
 
 
 class TradesView(APIView):
-    """Get recent trade history from Alpaca."""
-    
+    """Get recent trade history from IBKR."""
+
     permission_classes = [IsAuthenticated]
-    
+
     def get(self, request):
         try:
             trading_client = get_trading_client()
             orders = trading_client.get_orders_history(limit=30)
-            
+
             trades = []
             for order in orders:
+                # Get qty - handle both int and float
+                qty = order.get('qty', 0)
+                filled_qty = order.get('filled_qty', 0)
+
                 trades.append({
                     'id': order.get('id'),
                     'symbol': order.get('symbol'),
                     'action': order.get('side', '').upper(),
-                    'quantity': int(order.get('qty', 0)),
-                    'filled_quantity': int(order.get('filled_qty', 0)),
-                    'order_type': order.get('type', '').replace('OrderType.', ''),
-                    'status': order.get('status', '').replace('OrderStatus.', ''),
+                    'quantity': int(qty) if qty else 0,
+                    'filled_quantity': int(filled_qty) if filled_qty else 0,
+                    'order_type': order.get('type', '').replace('OrderType.', '').replace('order_type.', ''),
+                    'status': order.get('status', '').replace('OrderStatus.', '').replace('order_status.', ''),
                     'limit_price': order.get('limit_price'),
                     'filled_price': order.get('filled_avg_price'),
                     'created_at': order.get('created_at'),
-                    'filled_at': order.get('filled_at'),
                 })
-            
+
             return Response({'trades': trades})
         except Exception as e:
-            logger.error(f"Trades error: {e}")
+            logger.error(f"Trades error: {e}", exc_info=True)
             return Response({'error': str(e)}, status=500)
 
 

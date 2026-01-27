@@ -303,11 +303,21 @@ class IBKRBroker(BaseBroker):
             self._ensure_event_loop()
             if not self._connected:
                 self.connect()
-            
+
             trades = self.ib.trades()
             orders = []
-            
+
             for trade in trades[:limit]:
+                # Get the order creation time from the log if available
+                created_time = None
+                if trade.log and len(trade.log) > 0:
+                    # The first log entry typically contains the submission time
+                    created_time = trade.log[0].time if hasattr(trade.log[0], 'time') else None
+
+                # If no log time, use current time as fallback
+                if created_time is None:
+                    created_time = datetime.now(timezone.utc)
+
                 orders.append(Order(
                     id=str(trade.order.orderId),
                     symbol=trade.contract.symbol,
@@ -317,9 +327,10 @@ class IBKRBroker(BaseBroker):
                     status=trade.orderStatus.status.lower(),
                     limit_price=trade.order.lmtPrice if hasattr(trade.order, 'lmtPrice') else None,
                     filled_qty=trade.orderStatus.filled,
-                    filled_price=trade.orderStatus.avgFillPrice if trade.orderStatus.avgFillPrice else None
+                    filled_price=trade.orderStatus.avgFillPrice if trade.orderStatus.avgFillPrice else None,
+                    created_at=created_time
                 ))
-            
+
             return orders
         except Exception as e:
             logger.error(f"Error getting IBKR order history: {e}")
