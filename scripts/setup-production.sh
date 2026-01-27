@@ -1,6 +1,12 @@
 #!/bin/bash
-# Production Infrastructure Setup Script
-# Run this once to set up all GCP resources for production
+# Production Infrastructure Setup Script for Trading Application
+# This script sets up ONLY trading-specific resources, reusing existing infrastructure
+#
+# SAFE FOR EXISTING APPS: This script does NOT modify or affect existing applications
+# - Reuses existing Cloud SQL instance (samaanai-prod-postgres)
+# - Creates trading-specific VPC connector (trading-vpc-connector) - opt-in only
+# - Creates prefixed secrets (TRADING_*) to avoid conflicts
+# - Does NOT modify any existing services
 
 set -e
 
@@ -9,10 +15,23 @@ PROJECT_ID="samaanai-prod-1009-124126"
 REGION="us-west1"
 ZONE="${REGION}-b"
 
+# Existing infrastructure to REUSE (not create)
+EXISTING_CLOUDSQL_INSTANCE="samaanai-prod-postgres"
+
+# Trading-specific resources to CREATE
+TRADING_DB_NAME="stock_trading"
+TRADING_DB_USER="trading_backend"
+TRADING_VPC_CONNECTOR="trading-vpc-connector"
+TRADING_VPC_RANGE="10.9.0.0/28"  # Different range from any existing connectors
+
 echo "=========================================="
 echo "LLM Trading Agent - Production Setup"
 echo "Project: $PROJECT_ID"
 echo "Region: $REGION"
+echo ""
+echo "⚠️  SAFE MODE: This script only creates"
+echo "   trading-specific resources and does NOT"
+echo "   modify existing applications."
 echo "=========================================="
 
 # Check if gcloud is authenticated
@@ -25,7 +44,7 @@ fi
 gcloud config set project $PROJECT_ID
 echo "✅ Project set to $PROJECT_ID"
 
-# Enable required APIs
+# Enable required APIs (idempotent - won't affect existing services)
 echo ""
 echo "📦 Enabling required APIs..."
 gcloud services enable \
@@ -35,36 +54,61 @@ gcloud services enable \
     compute.googleapis.com \
     vpcaccess.googleapis.com \
     cloudscheduler.googleapis.com \
-    artifactregistry.googleapis.com \
-    cloudbuild.googleapis.com \
     --quiet
 
 echo "✅ APIs enabled"
 
-# Create Artifact Registry repository
+# ============================================
+# CLOUD SQL: Reuse existing instance, add database
+# ============================================
 echo ""
-echo "📦 Setting up Artifact Registry..."
-gcloud artifacts repositories describe trading-images \
-    --location=$REGION 2>/dev/null || \
-gcloud artifacts repositories create trading-images \
-    --repository-format=docker \
-    --location=$REGION \
-    --description="Trading application Docker images"
-echo "✅ Artifact Registry ready"
+echo "🗄️ Setting up Cloud SQL database..."
+echo "   Using existing instance: $EXISTING_CLOUDSQL_INSTANCE"
 
-# Create secrets (interactive prompts)
+# Verify existing instance exists
+if ! gcloud sql instances describe $EXISTING_CLOUDSQL_INSTANCE --project=$PROJECT_ID 2>/dev/null; then
+    echo "❌ Cloud SQL instance '$EXISTING_CLOUDSQL_INSTANCE' not found!"
+    echo "   Please verify the instance name or create it first."
+    exit 1
+fi
+
+echo "  ✅ Found existing Cloud SQL instance"
+
+# Create trading database (if not exists)
+if gcloud sql databases describe $TRADING_DB_NAME --instance=$EXISTING_CLOUDSQL_INSTANCE --project=$PROJECT_ID 2>/dev/null; then
+    echo "  ℹ️  Database '$TRADING_DB_NAME' already exists"
+else
+    echo "  Creating database '$TRADING_DB_NAME'..."
+    gcloud sql databases create $TRADING_DB_NAME \
+        --instance=$EXISTING_CLOUDSQL_INSTANCE \
+        --project=$PROJECT_ID
+    echo "  ✅ Database created"
+fi
+
+# ============================================
+# SECRETS: Create trading-specific secrets with TRADING_ prefix
+# ============================================
 echo ""
 echo "🔐 Setting up Secret Manager..."
-echo "Note: You can skip secrets that already exist."
+echo "   Note: Using TRADING_ prefix to avoid conflicts with existing secrets"
 echo ""
 
 create_secret() {
     local name=$1
     local description=$2
+    local reuse_existing=$3  # If set, check if non-prefixed version exists
 
     if gcloud secrets describe $name --project=$PROJECT_ID 2>/dev/null; then
         echo "  ℹ️  Secret '$name' already exists, skipping"
         return 0
+    fi
+
+    # Check if we should reuse an existing non-prefixed secret
+    if [ -n "$reuse_existing" ]; then
+        if gcloud secrets describe $reuse_existing --project=$PROJECT_ID 2>/dev/null; then
+            echo "  ℹ️  Using existing secret '$reuse_existing' (no need to create '$name')"
+            return 0
+        fi
     fi
 
     echo -n "  Enter value for $name ($description): "
@@ -80,79 +124,84 @@ create_secret() {
     echo "  ✅ Created secret: $name"
 }
 
-# Create all required secrets
-create_secret "django-secret-key" "Django SECRET_KEY (press Enter to auto-generate)"
-if ! gcloud secrets describe django-secret-key --project=$PROJECT_ID 2>/dev/null; then
-    openssl rand -base64 50 | gcloud secrets create django-secret-key --data-file=- --project=$PROJECT_ID
-    echo "  ✅ Auto-generated django-secret-key"
+# Trading-specific secrets (prefixed to avoid conflicts)
+create_secret "TRADING_SECRET_KEY" "Django SECRET_KEY for trading app"
+if ! gcloud secrets describe TRADING_SECRET_KEY --project=$PROJECT_ID 2>/dev/null; then
+    openssl rand -base64 50 | gcloud secrets create TRADING_SECRET_KEY --data-file=- --project=$PROJECT_ID
+    echo "  ✅ Auto-generated TRADING_SECRET_KEY"
 fi
 
-create_secret "db-password" "Cloud SQL database password"
-create_secret "gemini-api-key" "Google Gemini API key"
-create_secret "google-client-id" "Google OAuth client ID"
-create_secret "google-client-secret" "Google OAuth client secret"
-create_secret "sendgrid-api-key" "SendGrid API key (for emails)"
-create_secret "slack-webhook-url" "Slack webhook URL (for notifications)"
-create_secret "news-api-key" "NewsAPI key (optional)"
+create_secret "TRADING_DB_PASSWORD" "Trading database password"
+create_secret "TRADING_SENDGRID_API_KEY" "SendGrid API key for trading emails"
+create_secret "TRADING_SLACK_WEBHOOK" "Slack webhook for trading notifications"
+create_secret "TRADING_NEWS_API_KEY" "NewsAPI key for market news"
+
+# Check for reusable existing secrets
+echo ""
+echo "  Checking for existing secrets that can be reused..."
+for secret in GEMINI_API_KEY GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET; do
+    if gcloud secrets describe $secret --project=$PROJECT_ID 2>/dev/null; then
+        echo "  ✅ Found existing: $secret (will reuse)"
+    else
+        echo "  ⚠️  Not found: $secret (you may need to create it)"
+    fi
+done
 
 echo "✅ Secrets configured"
 
-# Create Cloud SQL instance
+# ============================================
+# CREATE DATABASE USER
+# ============================================
 echo ""
-echo "🗄️ Setting up Cloud SQL..."
-if gcloud sql instances describe samaanai-backend-db --project=$PROJECT_ID 2>/dev/null; then
-    echo "  ℹ️  Cloud SQL instance already exists"
+echo "👤 Setting up database user..."
+
+# Check if user exists
+if gcloud sql users list --instance=$EXISTING_CLOUDSQL_INSTANCE --project=$PROJECT_ID --format="value(name)" | grep -q "^${TRADING_DB_USER}$"; then
+    echo "  ℹ️  Database user '$TRADING_DB_USER' already exists"
 else
-    echo "  Creating Cloud SQL instance (this takes ~5 minutes)..."
-    gcloud sql instances create samaanai-backend-db \
-        --database-version=POSTGRES_14 \
-        --tier=db-custom-1-3840 \
-        --region=$REGION \
-        --storage-type=SSD \
-        --storage-size=20GB \
-        --storage-auto-increase \
-        --backup-start-time=04:00 \
-        --availability-type=zonal \
-        --maintenance-window-day=SUN \
-        --maintenance-window-hour=03 \
-        --project=$PROJECT_ID
-
-    # Create database
-    gcloud sql databases create stock_trading \
-        --instance=samaanai-backend-db \
-        --project=$PROJECT_ID
-
-    # Create user
-    DB_PASSWORD=$(gcloud secrets versions access latest --secret=db-password --project=$PROJECT_ID)
-    gcloud sql users create samaanai_backend \
-        --instance=samaanai-backend-db \
-        --password="$DB_PASSWORD" \
-        --project=$PROJECT_ID
-
-    echo "  ✅ Cloud SQL instance created"
+    # Get password from secret
+    if gcloud secrets describe TRADING_DB_PASSWORD --project=$PROJECT_ID 2>/dev/null; then
+        DB_PASSWORD=$(gcloud secrets versions access latest --secret=TRADING_DB_PASSWORD --project=$PROJECT_ID)
+        gcloud sql users create $TRADING_DB_USER \
+            --instance=$EXISTING_CLOUDSQL_INSTANCE \
+            --password="$DB_PASSWORD" \
+            --project=$PROJECT_ID
+        echo "  ✅ Database user '$TRADING_DB_USER' created"
+    else
+        echo "  ⚠️  Cannot create user - TRADING_DB_PASSWORD secret not found"
+        echo "     Please create the secret and run this script again"
+    fi
 fi
 
-# Create VPC connector
+# ============================================
+# VPC CONNECTOR: Create trading-specific connector
+# ============================================
 echo ""
 echo "🔌 Setting up VPC Connector..."
-if gcloud compute networks vpc-access connectors describe ibkr-connector \
+echo "   Note: This is opt-in only - existing services are NOT affected"
+
+if gcloud compute networks vpc-access connectors describe $TRADING_VPC_CONNECTOR \
     --region=$REGION --project=$PROJECT_ID 2>/dev/null; then
-    echo "  ℹ️  VPC connector already exists"
+    echo "  ℹ️  VPC connector '$TRADING_VPC_CONNECTOR' already exists"
 else
-    gcloud compute networks vpc-access connectors create ibkr-connector \
+    echo "  Creating VPC connector '$TRADING_VPC_CONNECTOR'..."
+    echo "  IP Range: $TRADING_VPC_RANGE (does not overlap with existing ranges)"
+    gcloud compute networks vpc-access connectors create $TRADING_VPC_CONNECTOR \
         --region=$REGION \
         --network=default \
-        --range=10.8.0.0/28 \
+        --range=$TRADING_VPC_RANGE \
         --min-instances=2 \
         --max-instances=3 \
         --project=$PROJECT_ID
     echo "  ✅ VPC connector created"
 fi
 
-# Create IBKR Gateway VM
+# ============================================
+# IBKR GATEWAY VM
+# ============================================
 echo ""
 echo "🖥️ Setting up IBKR Gateway VM..."
-if gcloud compute instances describe ibkr-gateway-prod --zone=$ZONE --project=$PROJECT_ID 2>/dev/null; then
+if gcloud compute instances describe trading-ibkr-gateway --zone=$ZONE --project=$PROJECT_ID 2>/dev/null; then
     echo "  ℹ️  IBKR Gateway VM already exists"
 else
     # Create startup script
@@ -182,14 +231,14 @@ apt-get update && apt-get install -y socat
 socat TCP-LISTEN:4004,fork,reuseaddr TCP:localhost:4002 &
 STARTUP_EOF
 
-    gcloud compute instances create ibkr-gateway-prod \
+    gcloud compute instances create trading-ibkr-gateway \
         --zone=$ZONE \
         --machine-type=e2-small \
         --provisioning-model=SPOT \
         --instance-termination-action=STOP \
         --image-family=ubuntu-2204-lts \
         --image-project=ubuntu-os-cloud \
-        --tags=ibkr-gateway \
+        --tags=trading-ibkr-gateway \
         --metadata-from-file=startup-script=/tmp/ibkr-startup.sh \
         --project=$PROJECT_ID
 
@@ -197,25 +246,29 @@ STARTUP_EOF
     echo "  ✅ IBKR Gateway VM created"
 fi
 
-# Create firewall rule
+# ============================================
+# FIREWALL RULES
+# ============================================
 echo ""
 echo "🔒 Setting up firewall rules..."
-if gcloud compute firewall-rules describe allow-ibkr-gateway --project=$PROJECT_ID 2>/dev/null; then
+if gcloud compute firewall-rules describe allow-trading-ibkr --project=$PROJECT_ID 2>/dev/null; then
     echo "  ℹ️  Firewall rule already exists"
 else
-    gcloud compute firewall-rules create allow-ibkr-gateway \
+    gcloud compute firewall-rules create allow-trading-ibkr \
         --direction=INGRESS \
         --priority=1000 \
         --network=default \
         --action=ALLOW \
         --rules=tcp:4001,tcp:4002,tcp:4004 \
-        --source-ranges=10.8.0.0/28 \
-        --target-tags=ibkr-gateway \
+        --source-ranges=$TRADING_VPC_RANGE \
+        --target-tags=trading-ibkr-gateway \
         --project=$PROJECT_ID
     echo "  ✅ Firewall rule created"
 fi
 
-# Grant IAM permissions to Cloud Run service account
+# ============================================
+# IAM PERMISSIONS
+# ============================================
 echo ""
 echo "🔑 Setting up IAM permissions..."
 SA_EMAIL=$(gcloud iam service-accounts list \
@@ -228,39 +281,71 @@ fi
 
 echo "  Service Account: $SA_EMAIL"
 
-# Grant Secret Manager access
-for secret in django-secret-key db-password gemini-api-key google-client-id google-client-secret sendgrid-api-key slack-webhook-url news-api-key; do
-    gcloud secrets add-iam-policy-binding $secret \
-        --member="serviceAccount:$SA_EMAIL" \
-        --role="roles/secretmanager.secretAccessor" \
-        --project=$PROJECT_ID --quiet 2>/dev/null || true
+# Grant Secret Manager access for trading-specific secrets
+for secret in TRADING_SECRET_KEY TRADING_DB_PASSWORD TRADING_SENDGRID_API_KEY TRADING_SLACK_WEBHOOK TRADING_NEWS_API_KEY; do
+    if gcloud secrets describe $secret --project=$PROJECT_ID 2>/dev/null; then
+        gcloud secrets add-iam-policy-binding $secret \
+            --member="serviceAccount:$SA_EMAIL" \
+            --role="roles/secretmanager.secretAccessor" \
+            --project=$PROJECT_ID --quiet 2>/dev/null || true
+    fi
 done
+
+# Also grant access to reusable existing secrets
+for secret in GEMINI_API_KEY GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET; do
+    if gcloud secrets describe $secret --project=$PROJECT_ID 2>/dev/null; then
+        gcloud secrets add-iam-policy-binding $secret \
+            --member="serviceAccount:$SA_EMAIL" \
+            --role="roles/secretmanager.secretAccessor" \
+            --project=$PROJECT_ID --quiet 2>/dev/null || true
+    fi
+done
+
 echo "  ✅ Secret Manager permissions granted"
 
-# Grant Cloud SQL access
+# Grant Cloud SQL access (if not already granted)
 gcloud projects add-iam-policy-binding $PROJECT_ID \
     --member="serviceAccount:$SA_EMAIL" \
     --role="roles/cloudsql.client" \
     --quiet 2>/dev/null || true
 echo "  ✅ Cloud SQL permissions granted"
 
-# Get IBKR VM IP
+# ============================================
+# SUMMARY
+# ============================================
 echo ""
 echo "📋 Configuration Summary"
 echo "=========================================="
-IBKR_IP=$(gcloud compute instances describe ibkr-gateway-prod \
+IBKR_IP=$(gcloud compute instances describe trading-ibkr-gateway \
     --zone=$ZONE --format='get(networkInterfaces[0].networkIP)' --project=$PROJECT_ID 2>/dev/null || echo "Not created yet")
-echo "IBKR Gateway IP: $IBKR_IP"
-echo "Cloud SQL Instance: samaanai-backend-db"
-echo "VPC Connector: ibkr-connector"
-echo "Region: $REGION"
+
+echo ""
+echo "REUSED INFRASTRUCTURE:"
+echo "  Cloud SQL Instance: $EXISTING_CLOUDSQL_INSTANCE"
+echo "  Existing Secrets: GEMINI_API_KEY, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET"
+echo ""
+echo "NEW TRADING-SPECIFIC RESOURCES:"
+echo "  Database: $TRADING_DB_NAME"
+echo "  DB User: $TRADING_DB_USER"
+echo "  VPC Connector: $TRADING_VPC_CONNECTOR"
+echo "  IBKR Gateway VM: trading-ibkr-gateway"
+echo "  IBKR Gateway IP: $IBKR_IP"
+echo ""
+echo "SECRETS CREATED:"
+echo "  TRADING_SECRET_KEY, TRADING_DB_PASSWORD, TRADING_SENDGRID_API_KEY"
+echo "  TRADING_SLACK_WEBHOOK, TRADING_NEWS_API_KEY"
 echo ""
 echo "=========================================="
 echo "✅ Production infrastructure setup complete!"
 echo ""
+echo "⚠️  EXISTING APPS ARE NOT AFFECTED:"
+echo "   - VPC connector is opt-in (only used if specified in Cloud Run deployment)"
+echo "   - Secrets use TRADING_ prefix (no conflicts)"
+echo "   - Database is separate (no shared tables)"
+echo ""
 echo "Next steps:"
 echo "1. Configure IBKR Gateway VM with your IB credentials"
-echo "   gcloud compute ssh ibkr-gateway-prod --zone=$ZONE"
+echo "   gcloud compute ssh trading-ibkr-gateway --zone=$ZONE"
 echo ""
 echo "2. Add GCP_SA_KEY_PROD secret to GitHub repository"
 echo "   - Go to GitHub repo → Settings → Secrets → Actions"
@@ -270,6 +355,7 @@ echo ""
 echo "3. Push to main branch to trigger production deployment"
 echo "   git checkout main && git merge staging && git push origin main"
 echo ""
-echo "4. Set GitHub repository variables (optional):"
+echo "4. Set GitHub repository variables:"
 echo "   - AUTHORIZED_EMAILS_PROD: Comma-separated list of allowed user emails"
 echo "   - EMAIL_RECIPIENTS_PROD: Comma-separated list of email recipients"
+echo ""

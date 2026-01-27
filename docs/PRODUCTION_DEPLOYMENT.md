@@ -4,6 +4,38 @@
 
 This guide covers deploying the LLM Trading Agent to Google Cloud Platform production environment (`samaanai-prod-1009-124126`).
 
+## ⚠️ IMPORTANT: Compatibility with Existing Applications
+
+This deployment is designed to **NOT break** any existing applications in the production project. Here's how we ensure compatibility:
+
+### What We REUSE (Existing Infrastructure)
+| Resource | Name | Notes |
+|----------|------|-------|
+| Cloud SQL Instance | `samaanai-prod-postgres` | Existing PostgreSQL 15 instance |
+| Secrets | `GEMINI_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Shared secrets |
+
+### What We CREATE (Trading-Specific Only)
+| Resource | Name | Notes |
+|----------|------|-------|
+| Database | `stock_trading` | New database in existing Cloud SQL |
+| DB User | `trading_backend` | New user for trading app only |
+| VPC Connector | `trading-vpc-connector` | **Opt-in only** - won't affect existing services |
+| Secrets | `TRADING_SECRET_KEY`, `TRADING_DB_PASSWORD`, etc. | Prefixed to avoid conflicts |
+| VM | `trading-ibkr-gateway` | For IBKR broker connection |
+| Cloud Run | `trading-api`, `trading-dashboard` | New services |
+
+### Why Existing Apps Won't Break
+1. **VPC Connector is opt-in**: Services must explicitly specify `--vpc-connector=trading-vpc-connector` to use it. Existing services are not modified.
+2. **Cloud SQL connection method is the same**: All apps use Cloud SQL Auth Proxy via `--add-cloudsql-instances` flag.
+3. **Prefixed secrets**: All trading-specific secrets use `TRADING_` prefix to avoid naming conflicts.
+4. **Separate database**: Trading app uses its own database (`stock_trading`), not shared tables.
+
+### Branch Strategy
+| Branch | Deploys To | GCP Project |
+|--------|-----------|-------------|
+| `staging` | Staging | `samaanai-stg-1009-124126` |
+| `main` | Production | `samaanai-prod-1009-124126` |
+
 ## Architecture
 
 ```
