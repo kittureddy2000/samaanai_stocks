@@ -160,8 +160,9 @@ jobs:
       - name: Build Frontend with production API URL
         working-directory: frontend
         run: |
-          # Use custom domain for API URL
-          echo "REACT_APP_API_URL=https://api.trading.samaanai.com" > .env.production
+          # Use Cloud Run URL until custom domain SSL is provisioned
+          # TODO: Switch to https://api.trading.samaanai.com once SSL is ready
+          echo "REACT_APP_API_URL=${{ steps.backend-url.outputs.url }}" > .env.production
           docker build -t gcr.io/$GCP_PROJECT/$FRONTEND_SERVICE:${{ github.sha }} .
           docker push gcr.io/$GCP_PROJECT/$FRONTEND_SERVICE:${{ github.sha }}
 
