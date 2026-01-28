@@ -1,41 +1,39 @@
 """Email notification module for daily trade summaries."""
 
 import os
-from typing import Dict, Any, List, Optional
-from datetime import datetime, date
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from typing import Dict, Any, List
+from datetime import date
 from loguru import logger
-
-# Try to import sendgrid, but don't fail if not installed
-try:
-    from sendgrid import SendGridAPIClient
-    from sendgrid.helpers.mail import Mail, Email, To, Content
-    SENDGRID_AVAILABLE = True
-except ImportError:
-    SENDGRID_AVAILABLE = False
-    logger.warning("sendgrid not installed. Email notifications will be disabled.")
 
 
 class EmailNotifier:
-    """Send email notifications for trade summaries."""
+    """Send email notifications for trade summaries via Gmail SMTP."""
 
     def __init__(self):
-        """Initialize email notifier with SendGrid API key."""
-        self.api_key = os.getenv("SENDGRID_API_KEY", "")
+        """Initialize email notifier with SMTP credentials."""
+        self.smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+        self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
+        self.smtp_user = os.getenv("SMTP_USER", "")
+        self.smtp_password = os.getenv("SMTP_PASSWORD", "")
         self.from_email = os.getenv("EMAIL_FROM", "trading@samaanai.com")
-        self.to_emails = os.getenv("EMAIL_RECIPIENTS", "").split(",")
-        self.enabled = bool(self.api_key) and SENDGRID_AVAILABLE and bool(self.to_emails[0])
+        self.to_emails = [e.strip() for e in os.getenv("EMAIL_RECIPIENTS", "").split(",") if e.strip()]
+
+        self.enabled = bool(self.smtp_user) and bool(self.smtp_password) and bool(self.to_emails)
 
         if not self.enabled:
-            if not SENDGRID_AVAILABLE:
-                logger.warning("sendgrid package not installed.")
-            elif not self.api_key:
-                logger.warning("SENDGRID_API_KEY not set.")
-            elif not self.to_emails[0]:
+            if not self.smtp_user:
+                logger.warning("SMTP_USER not set.")
+            elif not self.smtp_password:
+                logger.warning("SMTP_PASSWORD not set.")
+            elif not self.to_emails:
                 logger.warning("EMAIL_RECIPIENTS not set.")
             logger.warning("Email notifications disabled.")
 
     def send_email(self, subject: str, html_content: str, text_content: str = None) -> bool:
-        """Send an email via SendGrid.
+        """Send an email via SMTP.
 
         Args:
             subject: Email subject
@@ -50,25 +48,25 @@ class EmailNotifier:
             return False
 
         try:
-            message = Mail(
-                from_email=Email(self.from_email, "LLM Trading Agent"),
-                to_emails=[To(email.strip()) for email in self.to_emails if email.strip()],
-                subject=subject,
-                html_content=html_content
-            )
+            # Create message
+            msg = MIMEMultipart('alternative')
+            msg['Subject'] = subject
+            msg['From'] = f"LLM Trading Agent <{self.from_email}>"
+            msg['To'] = ", ".join(self.to_emails)
 
+            # Attach text and HTML parts
             if text_content:
-                message.add_content(Content("text/plain", text_content))
+                msg.attach(MIMEText(text_content, 'plain'))
+            msg.attach(MIMEText(html_content, 'html'))
 
-            sg = SendGridAPIClient(self.api_key)
-            response = sg.send(message)
+            # Connect to SMTP server and send
+            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+                server.starttls()
+                server.login(self.smtp_user, self.smtp_password)
+                server.sendmail(self.from_email, self.to_emails, msg.as_string())
 
-            if response.status_code in [200, 201, 202]:
-                logger.info(f"Email sent successfully: {subject}")
-                return True
-            else:
-                logger.error(f"Email failed with status {response.status_code}")
-                return False
+            logger.info(f"Email sent successfully: {subject}")
+            return True
 
         except Exception as e:
             logger.error(f"Error sending email: {e}")
@@ -226,7 +224,7 @@ class EmailNotifier:
                 <!-- Footer -->
                 <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; text-align: center; color: #666; font-size: 12px;">
                     <p>This is an automated summary from your LLM Trading Agent.</p>
-                    <p>Dashboard: <a href="https://trading-dashboard-staging-362270100637.us-west1.run.app" style="color: #667eea;">View Live Dashboard</a></p>
+                    <p>Dashboard: <a href="https://trading.samaanai.com" style="color: #667eea;">View Live Dashboard</a></p>
                 </div>
             </div>
         </body>
@@ -255,7 +253,7 @@ POSITIONS: {len(positions)}
 {"No open positions." if not positions else chr(10).join([f"- {p.get('symbol')}: {p.get('qty')} shares @ ${p.get('current_price', 0):,.2f}" for p in positions])}
 
 ---
-View Dashboard: https://trading-dashboard-staging-362270100637.us-west1.run.app
+View Dashboard: https://trading.samaanai.com
         """
 
         subject = f"Trading Summary: ${portfolio_value:,.0f} ({change_icon}{daily_change_pct:.1f}%) - {today}"
