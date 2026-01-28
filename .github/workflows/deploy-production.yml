@@ -108,8 +108,8 @@ jobs:
             EMAIL_RECIPIENTS=${{ vars.EMAIL_RECIPIENTS_PROD }}
             EMAIL_FROM=trading@samaanai.com
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
-            GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
-            GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
+            GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID_PROD }}
+            GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET_PROD }}
 
       - name: Verify deployment health
         run: |
