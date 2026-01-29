@@ -220,33 +220,31 @@ class BrokerStatusView(APIView):
 
 class PortfolioView(APIView):
     """Get current portfolio data."""
-    
+
     permission_classes = [IsAuthenticated]
-    
+
     def get(self, request):
         try:
-            logger.info(f"PortfolioView: Fetching portfolio for user {request.user.email}")
             trading_client = get_trading_client()
-            
-            logger.info("PortfolioView: Getting account...")
             account = trading_client.get_account()
-            logger.info(f"PortfolioView: Account result: {account}")
-            
-            logger.info("PortfolioView: Getting positions...")
             positions = trading_client.get_positions()
-            logger.info(f"PortfolioView: Positions count: {len(positions) if positions else 0}")
-            
+
             if not account:
-                logger.error("PortfolioView: Failed to get account - returned None")
-                return Response({'error': 'Failed to get account'}, status=500)
-            
-            # Calculate daily change
+                return Response({
+                    'account': {'cash': 0, 'portfolio_value': 0, 'equity': 0, 'buying_power': 0},
+                    'performance': {'daily_change': 0, 'daily_change_pct': 0},
+                    'positions': [],
+                    'positions_count': 0,
+                    'broker_connected': False,
+                    'error': 'Failed to get account data',
+                })
+
             daily_change = account['equity'] - account['last_equity']
             daily_change_pct = (
-                (daily_change / account['last_equity'] * 100) 
+                (daily_change / account['last_equity'] * 100)
                 if account['last_equity'] > 0 else 0
             )
-            
+
             return Response({
                 'account': {
                     'cash': account['cash'],
@@ -260,65 +258,103 @@ class PortfolioView(APIView):
                 },
                 'positions': positions,
                 'positions_count': len(positions),
+                'broker_connected': True,
             })
         except Exception as e:
-            logger.error(f"Portfolio error: {e}", exc_info=True)
-            return Response({'error': str(e)}, status=500)
+            logger.error(f"Portfolio error: {e}")
+            return Response({
+                'account': {'cash': 0, 'portfolio_value': 0, 'equity': 0, 'buying_power': 0},
+                'performance': {'daily_change': 0, 'daily_change_pct': 0},
+                'positions': [],
+                'positions_count': 0,
+                'broker_connected': False,
+                'error': str(e),
+            })
 
 
 class RiskView(APIView):
     """Get current risk status."""
-    
+
     permission_classes = [IsAuthenticated]
-    
+
     def get(self, request):
         try:
             trading_client = get_trading_client()
             risk_manager = get_risk_manager()
-            
+
             account = trading_client.get_account()
             if not account:
-                return Response({'error': 'Failed to get account'}, status=500)
-            
+                return Response({
+                    'risk_level': 'UNKNOWN',
+                    'daily_trades': 0,
+                    'daily_loss': 0,
+                    'max_position_value': 0,
+                    'kill_switch_active': False,
+                    'broker_connected': False,
+                    'error': 'Broker not connected',
+                })
+
             risk_status = risk_manager.get_risk_status(account)
+            risk_status['broker_connected'] = True
             return Response(risk_status)
         except Exception as e:
             logger.error(f"Risk error: {e}")
-            return Response({'error': str(e)}, status=500)
+            return Response({
+                'risk_level': 'UNKNOWN',
+                'daily_trades': 0,
+                'daily_loss': 0,
+                'max_position_value': 0,
+                'kill_switch_active': False,
+                'broker_connected': False,
+                'error': str(e),
+            })
 
 
 class MarketView(APIView):
     """Get market status."""
-    
+
     permission_classes = [AllowAny]  # Public endpoint
-    
+
     def get(self, request):
         try:
             trading_client = get_trading_client()
             is_open = trading_client.is_market_open()
             hours = trading_client.get_market_hours()
-            
+
             return Response({
                 'is_open': is_open,
                 'next_open': hours.get('next_open') if hours else None,
                 'next_close': hours.get('next_close') if hours else None,
+                'broker_connected': True,
             })
         except Exception as e:
             logger.error(f"Market error: {e}")
-            return Response({'error': str(e)}, status=500)
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            now = datetime.now(ZoneInfo('America/New_York'))
+            weekday = now.weekday()
+            hour = now.hour
+            is_market_hours = weekday < 5 and 9 <= hour < 16
+            return Response({
+                'is_open': is_market_hours,
+                'next_open': None,
+                'next_close': None,
+                'broker_connected': False,
+                'error': str(e),
+            })
 
 
 class WatchlistView(APIView):
     """Get current prices for watchlist."""
-    
+
     permission_classes = [IsAuthenticated]
-    
+
     def get(self, request):
         try:
             data_aggregator = get_data_aggregator()
             trading_config = settings.TRADING_CONFIG
             watchlist_symbols = trading_config['WATCHLIST']
-            
+
             prices = data_aggregator.market_client.get_current_prices(watchlist_symbols)
             watchlist = []
             for symbol in watchlist_symbols:
@@ -326,11 +362,16 @@ class WatchlistView(APIView):
                     'symbol': symbol,
                     'price': prices.get(symbol, 0)
                 })
-            
+
             return Response({'watchlist': watchlist})
         except Exception as e:
             logger.error(f"Watchlist error: {e}")
-            return Response({'error': str(e)}, status=500)
+            trading_config = settings.TRADING_CONFIG
+            watchlist_symbols = trading_config.get('WATCHLIST', [])
+            return Response({
+                'watchlist': [{'symbol': s, 'price': 0} for s in watchlist_symbols],
+                'error': str(e),
+            })
 
 
 class TradesView(APIView):
@@ -345,7 +386,6 @@ class TradesView(APIView):
 
             trades = []
             for order in orders:
-                # Get qty - handle both int and float
                 qty = order.get('qty', 0)
                 filled_qty = order.get('filled_qty', 0)
 
@@ -362,10 +402,10 @@ class TradesView(APIView):
                     'created_at': order.get('created_at'),
                 })
 
-            return Response({'trades': trades})
+            return Response({'trades': trades, 'broker_connected': True})
         except Exception as e:
-            logger.error(f"Trades error: {e}", exc_info=True)
-            return Response({'error': str(e)}, status=500)
+            logger.error(f"Trades error: {e}")
+            return Response({'trades': [], 'broker_connected': False, 'error': str(e)})
 
 
 class ConfigView(APIView):
