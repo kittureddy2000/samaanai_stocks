@@ -261,7 +261,12 @@ class IBKRBroker(BaseBroker):
             return None
 
     def get_positions(self) -> List[Position]:
-        """Get all open positions from IBKR."""
+        """Get all open positions from IBKR.
+
+        Uses ib.portfolio() instead of ib.positions() + reqMktData() to avoid
+        market data subscription requirements. ib.portfolio() already includes
+        marketPrice, marketValue, and unrealizedPNL from the account update stream.
+        """
         start = time.time()
         logger.debug("IBKR get_positions called")
         try:
@@ -269,25 +274,38 @@ class IBKRBroker(BaseBroker):
                 logger.error("IBKR get_positions: not connected")
                 return []
 
-            positions = self.ib.positions()
+            # Use ib.portfolio() which includes market prices from account updates
+            # This avoids reqMktData() calls that require market data subscriptions
+            portfolio_items = self.ib.portfolio()
             result = []
 
-            for pos in positions:
-                current_price = self._get_current_price(pos.contract.symbol)
-                market_value = pos.position * current_price
-                cost_basis = pos.position * pos.avgCost
-                unrealized_pl = market_value - cost_basis
-                unrealized_plpc = (unrealized_pl / cost_basis) if cost_basis != 0 else 0
+            for item in portfolio_items:
+                current_price = self._safe_float(item.marketPrice)
+                market_value = self._safe_float(item.marketValue)
+                unrealized_pl = self._safe_float(item.unrealizedPNL)
+                avg_cost = self._safe_float(item.averageCost)
+                qty = self._safe_float(item.position)
+                cost_basis = qty * avg_cost
+
+                unrealized_plpc = (
+                    (unrealized_pl / cost_basis) if cost_basis != 0 else 0
+                )
 
                 result.append(Position(
-                    symbol=pos.contract.symbol,
-                    qty=pos.position,
-                    avg_entry_price=pos.avgCost,
+                    symbol=item.contract.symbol,
+                    qty=qty,
+                    avg_entry_price=avg_cost,
                     current_price=current_price,
                     market_value=market_value,
                     unrealized_pl=unrealized_pl,
                     unrealized_plpc=unrealized_plpc
                 ))
+
+                logger.debug(
+                    f"  Position: {item.contract.symbol} qty={qty} "
+                    f"price=${current_price:.2f} value=${market_value:.2f} "
+                    f"pl=${unrealized_pl:.2f}"
+                )
 
             elapsed = time.time() - start
             logger.info(f"IBKR get_positions: {len(result)} positions in {elapsed:.2f}s")
@@ -553,8 +571,30 @@ class IBKRBroker(BaseBroker):
             'next_close': str(next_close) if isinstance(next_close, datetime) else next_close
         }
 
+    @staticmethod
+    def _safe_float(value, default=0.0) -> float:
+        """Safely convert a value to float, handling NaN, Inf, and None.
+
+        IBKR can return float('nan'), float('inf'), or None for prices
+        when market data is unavailable. These values break JSON serialization.
+        """
+        import math
+        if value is None:
+            return default
+        try:
+            f = float(value)
+            if math.isnan(f) or math.isinf(f):
+                return default
+            return f
+        except (ValueError, TypeError):
+            return default
+
     def _get_current_price(self, symbol: str) -> float:
-        """Get current price for a symbol using IBKR market data."""
+        """Get current price for a symbol using IBKR market data.
+
+        Note: This uses reqMktData which requires market data subscriptions.
+        Prefer using ib.portfolio() data via get_positions() when possible.
+        """
         start = time.time()
         try:
             contract = self.Stock(symbol, 'SMART', 'USD')
@@ -562,7 +602,7 @@ class IBKRBroker(BaseBroker):
             ticker = self.ib.reqMktData(contract)
             self.ib.sleep(2)  # Wait for data
 
-            price = ticker.last or ticker.close or 0
+            price = self._safe_float(ticker.last) or self._safe_float(ticker.close) or 0
             self.ib.cancelMktData(contract)  # Clean up
             elapsed = time.time() - start
             logger.debug(f"IBKR price for {symbol}: ${price} ({elapsed:.2f}s)")

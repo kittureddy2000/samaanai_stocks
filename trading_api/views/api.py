@@ -641,20 +641,25 @@ class TradesView(APIView):
         start_time = time.time()
         logger.info("TradesView.get called")
 
+        user = request.user if request.user.is_authenticated else None
+        broker_connected = False
+        broker_trades = []
+
+        # Try to get live trades from broker
         try:
             trading_client = get_trading_client()
             orders = trading_client.get_orders_history(limit=30)
+            broker_connected = True
 
-            # Sync to DB for persistence
-            user = request.user if request.user.is_authenticated else None
-            sync_trades_to_db(orders, user=user)
+            # Sync live trades to DB for persistence
+            if orders:
+                sync_trades_to_db(orders, user=user)
 
-            trades = []
             for order in orders:
                 qty = order.get('qty', 0)
                 filled_qty = order.get('filled_qty', 0)
 
-                trades.append({
+                broker_trades.append({
                     'id': order.get('id'),
                     'symbol': order.get('symbol'),
                     'action': order.get('side', '').upper(),
@@ -666,32 +671,46 @@ class TradesView(APIView):
                     'filled_price': order.get('filled_avg_price'),
                     'created_at': order.get('created_at'),
                 })
-
-            elapsed = time.time() - start_time
-            logger.info(
-                f"TradesView.get completed in {elapsed:.2f}s: "
-                f"{len(trades)} trades from broker"
-            )
-            return Response({
-                'trades': trades,
-                'broker_connected': True,
-                'source': 'ibkr_live',
-            })
-
         except Exception as e:
-            elapsed = time.time() - start_time
-            logger.warning(
-                f"TradesView.get broker failed in {elapsed:.2f}s: {e}, "
-                f"falling back to DB"
-            )
-            return self._fallback_from_db(request)
+            logger.warning(f"TradesView.get broker error: {e}")
 
-    def _fallback_from_db(self, request):
-        """Serve trade history from Django database when broker is unavailable."""
+        # Always supplement with DB trades (covers gateway restarts)
+        db_trades = self._get_db_trades(user)
+
+        # Merge: broker trades first, then DB trades not already in broker set
+        broker_ids = {t['id'] for t in broker_trades if t.get('id')}
+        merged_trades = list(broker_trades)
+        for t in db_trades:
+            if t['id'] not in broker_ids:
+                merged_trades.append(t)
+
+        # Sort by created_at descending, limit to 30
+        merged_trades.sort(
+            key=lambda t: t.get('created_at') or '', reverse=True
+        )
+        merged_trades = merged_trades[:30]
+
+        source = 'ibkr_live' if broker_trades else ('database' if db_trades else 'none')
+
+        elapsed = time.time() - start_time
+        logger.info(
+            f"TradesView.get completed in {elapsed:.2f}s: "
+            f"{len(broker_trades)} from broker + {len(db_trades)} from DB "
+            f"= {len(merged_trades)} merged"
+        )
+
+        return Response({
+            'trades': merged_trades,
+            'broker_connected': broker_connected,
+            'source': source,
+        })
+
+    def _get_db_trades(self, user):
+        """Get trade history from the Django database."""
         from trading_api.models import Trade
 
         db_trades = Trade.objects.filter(
-            user=request.user
+            user=user
         ).order_by('-created_at')[:30]
 
         trades = []
@@ -709,13 +728,7 @@ class TradesView(APIView):
                 'created_at': t.created_at.isoformat() if t.created_at else None,
             })
 
-        logger.info(f"TradesView fallback from DB: {len(trades)} trades")
-
-        return Response({
-            'trades': trades,
-            'broker_connected': False,
-            'source': 'database',
-        })
+        return trades
 
 
 class ConfigView(APIView):
