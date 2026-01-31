@@ -18,7 +18,7 @@ LOGS_DIR.mkdir(exist_ok=True)
 class IBKRConfig(BaseModel):
     """Interactive Brokers API configuration."""
     gateway_host: str = os.getenv("IBKR_GATEWAY_HOST", "127.0.0.1")
-    gateway_port: int = int(os.getenv("IBKR_GATEWAY_PORT", "4004"))
+    gateway_port: int = int(os.getenv("IBKR_GATEWAY_PORT", "4002"))
     client_id: int = int(os.getenv("IBKR_CLIENT_ID", "1"))
 
 

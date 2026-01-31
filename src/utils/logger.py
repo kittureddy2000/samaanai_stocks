@@ -49,6 +49,20 @@ def setup_logger():
         rotation="5 MB",
         retention="30 days"
     )
+
+    # Separate file for broker/connection diagnostics
+    logger.add(
+        LOGS_DIR / "broker.log",
+        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
+        level="DEBUG",
+        filter=lambda record: any(
+            kw in record["message"].lower()
+            for kw in ["ibkr", "broker", "connect", "gateway", "reconnect"]
+        ),
+        rotation="10 MB",
+        retention="30 days",
+        compression="zip"
+    )
     
     logger.info("Logger initialized")
     return logger

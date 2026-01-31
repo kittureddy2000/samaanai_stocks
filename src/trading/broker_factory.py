@@ -1,6 +1,6 @@
 """Broker factory for IBKR trading.
 
-Provides a factory function to instantiate the IBKR broker.
+Provides a factory function to instantiate the IBKR broker with retry logic.
 """
 
 import os
@@ -14,17 +14,17 @@ class BrokerConnectionError(Exception):
 
 
 def get_broker() -> BaseBroker:
-    """Factory function to get the IBKR broker.
+    """Factory function to get the IBKR broker with retry logic.
 
     Returns:
         IBKRBroker instance
 
     Raises:
-        BrokerConnectionError: If IBKR connection fails
+        BrokerConnectionError: If IBKR connection fails after retries
     """
     broker_type = os.environ.get('BROKER_TYPE', 'ibkr').lower()
 
-    logger.info(f"Initializing broker: {broker_type}")
+    logger.info(f"Initializing broker: type={broker_type}")
 
     if broker_type != 'ibkr':
         logger.warning(f"BROKER_TYPE={broker_type} is not supported. Only 'ibkr' is available.")
@@ -33,18 +33,18 @@ def get_broker() -> BaseBroker:
         from src.trading.ibkr_broker import IBKRBroker
         broker = IBKRBroker()
 
-        # IBKR requires explicit connection
-        if not broker.connect():
+        # IBKR requires explicit connection - use retry logic
+        if not broker.connect_with_retry(max_retries=3):
+            host = os.environ.get('IBKR_GATEWAY_HOST', '127.0.0.1')
+            port = os.environ.get('IBKR_GATEWAY_PORT', '4002')
             error_msg = (
-                f"Failed to connect to IBKR Gateway at "
-                f"{os.environ.get('IBKR_GATEWAY_HOST', '127.0.0.1')}:"
-                f"{os.environ.get('IBKR_GATEWAY_PORT', '4004')}. "
-                "Please ensure IB Gateway is running and accessible."
+                f"Failed to connect to IBKR Gateway at {host}:{port} "
+                f"after 3 attempts. Ensure IB Gateway is running and accessible."
             )
             logger.error(error_msg)
             raise BrokerConnectionError(error_msg)
 
-        logger.info("✅ IBKR broker connected successfully")
+        logger.info("IBKR broker connected successfully via factory")
         return broker
 
     except ImportError as e:

@@ -2,7 +2,7 @@
 
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from .models import User, Trade, PortfolioSnapshot
+from .models import User, Trade, PortfolioSnapshot, PositionSnapshot
 
 
 @admin.register(User)
@@ -46,8 +46,19 @@ class TradeAdmin(admin.ModelAdmin):
 @admin.register(PortfolioSnapshot)
 class PortfolioSnapshotAdmin(admin.ModelAdmin):
     """Portfolio snapshot admin configuration."""
-    
+
     list_display = ('portfolio_value', 'cash', 'equity', 'daily_change_pct', 'timestamp')
     list_filter = ('timestamp',)
+    ordering = ('-timestamp',)
+    readonly_fields = ('timestamp',)
+
+
+@admin.register(PositionSnapshot)
+class PositionSnapshotAdmin(admin.ModelAdmin):
+    """Position snapshot admin configuration."""
+
+    list_display = ('symbol', 'qty', 'current_price', 'unrealized_pl', 'timestamp')
+    list_filter = ('symbol', 'timestamp')
+    search_fields = ('symbol',)
     ordering = ('-timestamp',)
     readonly_fields = ('timestamp',)

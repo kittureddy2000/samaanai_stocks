@@ -8,6 +8,10 @@ Imports are done lazily to avoid issues during collectstatic at build time.
 
 import sys
 import os
+import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Add the project root to path to access src modules
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -20,23 +24,72 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 
-# Cached broker instance
-# Force rebuild 2
+# Cached broker instance with health checking
 _broker_instance = None
+_broker_last_check = 0
+_HEALTH_CHECK_INTERVAL = 60  # seconds between health checks
 
 
 def get_broker():
-    """Get the configured broker instance (Alpaca or IBKR).
-    
+    """Get the configured broker instance with health checking.
+
+    Returns a cached instance, but validates it is still connected.
+    If connection is lost, invalidates cache and creates a new instance.
+
     Uses the BROKER_TYPE environment variable to determine which broker to use.
-    Returns a cached instance to avoid reconnection overhead.
     """
-    global _broker_instance
-    if _broker_instance is None:
-        print("DEBUG: _broker_instance is None, creating new broker")
-        from src.trading.broker_factory import get_broker as _get_broker
-        _broker_instance = _get_broker()
+    global _broker_instance, _broker_last_check
+
+    now = time.time()
+
+    # Return cached instance if recently validated
+    if _broker_instance is not None:
+        if (now - _broker_last_check) < _HEALTH_CHECK_INTERVAL:
+            logger.debug("Returning cached broker instance (recently validated)")
+            return _broker_instance
+
+        # Periodic health check
+        try:
+            if _broker_instance.ib.isConnected():
+                _broker_last_check = now
+                logger.debug("Broker health check passed, reusing cached instance")
+                return _broker_instance
+            else:
+                logger.warning(
+                    "Broker health check failed: isConnected=False, "
+                    "invalidating cached instance"
+                )
+                _broker_instance = None
+        except Exception as e:
+            logger.warning(f"Broker health check exception: {e}, invalidating cached instance")
+            _broker_instance = None
+
+    # Create new instance
+    logger.info("Creating new broker instance via factory")
+    from src.trading.broker_factory import get_broker as _get_broker
+    _broker_instance = _get_broker()
+    _broker_last_check = now
+    logger.info("New broker instance created and cached")
     return _broker_instance
+
+
+def invalidate_broker():
+    """Explicitly invalidate the cached broker instance.
+
+    Call this when the broker connection is known to be broken,
+    e.g., after catching a connection error in a view.
+    """
+    global _broker_instance, _broker_last_check
+    if _broker_instance is not None:
+        try:
+            _broker_instance.disconnect()
+        except Exception:
+            pass
+        logger.info("Broker instance invalidated and disconnected")
+    else:
+        logger.debug("invalidate_broker called but no instance was cached")
+    _broker_instance = None
+    _broker_last_check = 0
 
 
 def get_broker_name():
@@ -105,6 +158,7 @@ def get_slack():
 __all__ = [
     'get_broker',
     'get_broker_name',
+    'invalidate_broker',
     'get_risk_manager',
     'get_order_manager',
     'get_portfolio_tracker',
@@ -115,4 +169,3 @@ __all__ = [
     'get_llm_client',
     'get_slack',
 ]
-

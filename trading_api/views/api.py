@@ -1,11 +1,15 @@
 """Trading API views.
 
 Migrated from Flask to Django REST Framework.
+Includes trade/position persistence, DB fallback, and diagnostic logging.
 """
 
 import logging
+import time
 import concurrent.futures
+from datetime import timedelta
 from django.conf import settings
+from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -13,7 +17,10 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 logger = logging.getLogger(__name__)
 
 
-# Lazy import functions to avoid import errors during collectstatic
+# ---------------------------------------------------------------------------
+# Lazy import helpers
+# ---------------------------------------------------------------------------
+
 def get_trading_client():
     """Get trading client using broker factory (supports Alpaca and IBKR)."""
     from trading_api.services import get_broker
@@ -28,10 +35,10 @@ def get_broker_info():
 
 class BrokerClientWrapper:
     """Wrapper to provide backward-compatible dict interface from broker dataclasses."""
-    
+
     def __init__(self, broker):
         self.broker = broker
-    
+
     def get_account(self):
         """Get account as dictionary."""
         account = self.broker.get_account()
@@ -45,7 +52,7 @@ class BrokerClientWrapper:
             'equity': account.equity,
             'last_equity': account.last_equity,
         }
-    
+
     def get_positions(self):
         """Get positions as list of dictionaries."""
         positions = self.broker.get_positions()
@@ -61,7 +68,7 @@ class BrokerClientWrapper:
             }
             for pos in positions
         ]
-    
+
     def get_orders_history(self, limit=50):
         """Get order history as list of dictionaries."""
         orders = self.broker.get_orders_history(limit)
@@ -80,11 +87,11 @@ class BrokerClientWrapper:
             }
             for order in orders
         ]
-    
+
     def is_market_open(self):
         """Check if market is open."""
         return self.broker.is_market_open()
-    
+
     def get_market_hours(self):
         """Get market hours."""
         return self.broker.get_market_hours()
@@ -104,6 +111,138 @@ def get_data_aggregator():
     return DataAggregator()
 
 
+# ---------------------------------------------------------------------------
+# Persistence helpers
+# ---------------------------------------------------------------------------
+
+def sync_trades_to_db(orders, user=None):
+    """Sync IBKR trade data to Django Trade model.
+
+    Uses order_id for deduplication via update_or_create.
+    Only syncs orders that have an order_id.
+
+    Args:
+        orders: List of order dicts from BrokerClientWrapper.get_orders_history()
+        user: Optional Django User instance
+
+    Returns:
+        Tuple of (created_count, updated_count)
+    """
+    from trading_api.models import Trade
+
+    created = 0
+    updated = 0
+
+    for order in orders:
+        order_id = order.get('id')
+        if not order_id:
+            continue
+
+        side = order.get('side', '').upper()
+        if side not in ('BUY', 'SELL'):
+            continue
+
+        qty = int(order.get('qty', 0)) if order.get('qty') else 0
+        filled_price = order.get('filled_avg_price')
+        price = filled_price or 0
+
+        try:
+            obj, was_created = Trade.objects.update_or_create(
+                order_id=order_id,
+                defaults={
+                    'user': user,
+                    'symbol': order.get('symbol', ''),
+                    'action': side,
+                    'quantity': qty,
+                    'price': price,
+                    'total_value': qty * float(price) if price else 0,
+                    'order_type': order.get('type', 'market'),
+                    'status': order.get('status', 'pending'),
+                    'filled_qty': int(order.get('filled_qty', 0)) if order.get('filled_qty') else None,
+                    'filled_avg_price': filled_price,
+                    'limit_price': order.get('limit_price'),
+                }
+            )
+            if was_created:
+                created += 1
+            else:
+                updated += 1
+        except Exception as e:
+            logger.error(f"Failed to sync trade order_id={order_id}: {e}")
+
+    if created or updated:
+        logger.info(f"Trade sync complete: {created} created, {updated} updated")
+
+    return created, updated
+
+
+def save_portfolio_snapshot(account, positions, user=None):
+    """Save portfolio and position snapshots to database.
+
+    Args:
+        account: Account dict from BrokerClientWrapper
+        positions: List of position dicts
+        user: Optional Django User instance
+
+    Returns:
+        The created PortfolioSnapshot, or None on error
+    """
+    from trading_api.models import PortfolioSnapshot, PositionSnapshot
+
+    try:
+        daily_change = account['equity'] - account['last_equity']
+        daily_change_pct = (
+            (daily_change / account['last_equity'] * 100)
+            if account['last_equity'] > 0 else 0
+        )
+
+        snapshot = PortfolioSnapshot.objects.create(
+            user=user,
+            portfolio_value=account['portfolio_value'],
+            cash=account['cash'],
+            equity=account['equity'],
+            daily_change=daily_change,
+            daily_change_pct=daily_change_pct,
+        )
+
+        # Save individual positions linked to this snapshot
+        for pos in positions:
+            PositionSnapshot.objects.create(
+                user=user,
+                portfolio_snapshot=snapshot,
+                symbol=pos['symbol'],
+                qty=pos['qty'],
+                avg_entry_price=pos['avg_entry_price'],
+                current_price=pos['current_price'],
+                market_value=pos['market_value'],
+                unrealized_pl=pos['unrealized_pl'],
+                unrealized_plpc=pos['unrealized_plpc'],
+            )
+
+        logger.info(
+            f"Portfolio snapshot saved: ${account['portfolio_value']}, "
+            f"{len(positions)} positions"
+        )
+        return snapshot
+
+    except Exception as e:
+        logger.error(f"Failed to save portfolio snapshot: {e}")
+        return None
+
+
+def should_save_snapshot(user):
+    """Check if enough time has passed since last snapshot (5 min minimum)."""
+    from trading_api.models import PortfolioSnapshot
+    last = PortfolioSnapshot.objects.filter(user=user).order_by('-timestamp').first()
+    if not last:
+        return True
+    return timezone.now() - last.timestamp > timedelta(minutes=5)
+
+
+# ---------------------------------------------------------------------------
+# API Views
+# ---------------------------------------------------------------------------
+
 class BrokerStatusView(APIView):
     """Get detailed broker connection status and diagnostics."""
 
@@ -114,9 +253,12 @@ class BrokerStatusView(APIView):
         import socket
         from datetime import datetime
 
+        start_time = time.time()
+        logger.info("BrokerStatusView.get called")
+
         broker_name = get_broker_info()
         host = os.environ.get('IBKR_GATEWAY_HOST', '127.0.0.1')
-        port = int(os.environ.get('IBKR_GATEWAY_PORT', '4004'))
+        port = int(os.environ.get('IBKR_GATEWAY_PORT', '4002'))
 
         status = {
             'broker': broker_name,
@@ -131,74 +273,92 @@ class BrokerStatusView(APIView):
 
         # Check 1: TCP connectivity to IBKR Gateway
         try:
+            tcp_start = time.time()
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(5)
             result = sock.connect_ex((host, port))
             sock.close()
+            tcp_elapsed = time.time() - tcp_start
 
             if result == 0:
                 status['checks']['tcp_connection'] = {
                     'status': 'ok',
-                    'message': f'TCP connection to {host}:{port} successful'
+                    'message': f'TCP connection to {host}:{port} successful ({tcp_elapsed:.2f}s)'
                 }
+                logger.info(f"BrokerStatus TCP check OK: {host}:{port} in {tcp_elapsed:.2f}s")
             else:
                 status['checks']['tcp_connection'] = {
                     'status': 'error',
-                    'message': f'TCP connection failed (code={result})'
+                    'message': f'TCP connection failed (code={result}, {tcp_elapsed:.2f}s)'
                 }
                 status['errors'].append(f'Cannot reach IBKR Gateway at {host}:{port}')
+                logger.warning(f"BrokerStatus TCP check FAILED: code={result}, {tcp_elapsed:.2f}s")
         except Exception as e:
             status['checks']['tcp_connection'] = {
                 'status': 'error',
                 'message': str(e)
             }
             status['errors'].append(f'TCP connection error: {str(e)}')
+            logger.error(f"BrokerStatus TCP exception: {e}")
 
         # Check 2: Broker API connection
         try:
+            api_start = time.time()
             from trading_api.services import get_broker
             broker = get_broker()
 
             if broker.test_connection():
+                api_elapsed = time.time() - api_start
                 status['checks']['api_connection'] = {
                     'status': 'ok',
-                    'message': 'IBKR API connection verified'
+                    'message': f'IBKR API connection verified ({api_elapsed:.2f}s)'
                 }
+                logger.info(f"BrokerStatus API check OK in {api_elapsed:.2f}s")
             else:
+                api_elapsed = time.time() - api_start
                 status['checks']['api_connection'] = {
                     'status': 'error',
-                    'message': 'IBKR API connection test failed'
+                    'message': f'IBKR API connection test failed ({api_elapsed:.2f}s)'
                 }
                 status['errors'].append('Broker API connection test failed')
+                logger.warning(f"BrokerStatus API check FAILED in {api_elapsed:.2f}s")
         except Exception as e:
             status['checks']['api_connection'] = {
                 'status': 'error',
                 'message': str(e)
             }
             status['errors'].append(f'Broker API error: {str(e)}')
+            logger.error(f"BrokerStatus API exception: {e}")
 
         # Check 3: Account data retrieval
         try:
+            acct_start = time.time()
             trading_client = get_trading_client()
             account = trading_client.get_account()
+            acct_elapsed = time.time() - acct_start
 
             if account:
                 status['checks']['account_data'] = {
                     'status': 'ok',
-                    'message': f'Account {account.get("id", "unknown")} accessible',
+                    'message': f'Account {account.get("id", "unknown")} accessible ({acct_elapsed:.2f}s)',
                     'account_id': account.get('id'),
                     'cash': account.get('cash'),
                     'portfolio_value': account.get('portfolio_value'),
                     'buying_power': account.get('buying_power'),
                 }
                 status['trading_ready'] = True
+                logger.info(
+                    f"BrokerStatus account check OK in {acct_elapsed:.2f}s: "
+                    f"account={account.get('id')}"
+                )
             else:
                 status['checks']['account_data'] = {
                     'status': 'error',
-                    'message': 'Failed to retrieve account data'
+                    'message': f'Failed to retrieve account data ({acct_elapsed:.2f}s)'
                 }
                 status['errors'].append('Cannot retrieve account data from broker')
                 status['trading_ready'] = False
+                logger.warning(f"BrokerStatus account check FAILED in {acct_elapsed:.2f}s")
         except Exception as e:
             status['checks']['account_data'] = {
                 'status': 'error',
@@ -206,6 +366,7 @@ class BrokerStatusView(APIView):
             }
             status['errors'].append(f'Account data error: {str(e)}')
             status['trading_ready'] = False
+            logger.error(f"BrokerStatus account exception: {e}")
 
         # Overall status
         all_checks_ok = all(
@@ -215,34 +376,53 @@ class BrokerStatusView(APIView):
         status['overall_status'] = 'connected' if all_checks_ok else 'error'
         status['can_trade'] = all_checks_ok and status.get('trading_ready', False)
 
+        elapsed = time.time() - start_time
+        check_summary = ', '.join(
+            f'{k}:{v.get("status")}' for k, v in status['checks'].items()
+        )
+        logger.info(
+            f"BrokerStatusView.get completed in {elapsed:.2f}s: "
+            f"overall={status['overall_status']}, can_trade={status['can_trade']}, "
+            f"checks=[{check_summary}]"
+        )
+
         return Response(status)
 
 
 class PortfolioView(APIView):
-    """Get current portfolio data."""
+    """Get current portfolio data with persistence and fallback."""
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        start_time = time.time()
+        logger.info("PortfolioView.get called")
+
         try:
             trading_client = get_trading_client()
             account = trading_client.get_account()
             positions = trading_client.get_positions()
 
             if not account:
-                return Response({
-                    'account': {'cash': 0, 'portfolio_value': 0, 'equity': 0, 'buying_power': 0},
-                    'performance': {'daily_change': 0, 'daily_change_pct': 0},
-                    'positions': [],
-                    'positions_count': 0,
-                    'broker_connected': False,
-                    'error': 'Failed to get account data',
-                })
+                logger.warning("PortfolioView: account data unavailable, falling back to DB")
+                return self._fallback_from_db(request)
 
             daily_change = account['equity'] - account['last_equity']
             daily_change_pct = (
                 (daily_change / account['last_equity'] * 100)
                 if account['last_equity'] > 0 else 0
+            )
+
+            # Persist snapshot (rate limited)
+            user = request.user if request.user.is_authenticated else None
+            if should_save_snapshot(user):
+                save_portfolio_snapshot(account, positions, user=user)
+
+            elapsed = time.time() - start_time
+            logger.info(
+                f"PortfolioView.get completed in {elapsed:.2f}s: "
+                f"portfolio=${account['portfolio_value']}, "
+                f"{len(positions)} positions"
             )
 
             return Response({
@@ -259,17 +439,70 @@ class PortfolioView(APIView):
                 'positions': positions,
                 'positions_count': len(positions),
                 'broker_connected': True,
+                'source': 'ibkr_live',
             })
         except Exception as e:
-            logger.error(f"Portfolio error: {e}")
+            elapsed = time.time() - start_time
+            logger.warning(
+                f"PortfolioView.get broker failed in {elapsed:.2f}s: {e}, "
+                f"falling back to DB"
+            )
+            return self._fallback_from_db(request)
+
+    def _fallback_from_db(self, request):
+        """Serve portfolio from most recent DB snapshot."""
+        from trading_api.models import PortfolioSnapshot
+
+        snapshot = PortfolioSnapshot.objects.filter(
+            user=request.user
+        ).order_by('-timestamp').first()
+
+        if not snapshot:
+            logger.info("PortfolioView fallback: no snapshots in DB")
             return Response({
                 'account': {'cash': 0, 'portfolio_value': 0, 'equity': 0, 'buying_power': 0},
                 'performance': {'daily_change': 0, 'daily_change_pct': 0},
                 'positions': [],
                 'positions_count': 0,
                 'broker_connected': False,
-                'error': str(e),
+                'source': 'none',
+                'error': 'No data available - broker disconnected and no snapshots saved',
             })
+
+        positions = []
+        for ps in snapshot.positions.all():
+            positions.append({
+                'symbol': ps.symbol,
+                'qty': float(ps.qty),
+                'avg_entry_price': float(ps.avg_entry_price),
+                'current_price': float(ps.current_price),
+                'market_value': float(ps.market_value),
+                'unrealized_pl': float(ps.unrealized_pl),
+                'unrealized_plpc': float(ps.unrealized_plpc),
+            })
+
+        logger.info(
+            f"PortfolioView fallback from DB: "
+            f"snapshot={snapshot.timestamp.isoformat()}, {len(positions)} positions"
+        )
+
+        return Response({
+            'account': {
+                'cash': float(snapshot.cash),
+                'portfolio_value': float(snapshot.portfolio_value),
+                'equity': float(snapshot.equity),
+                'buying_power': 0,
+            },
+            'performance': {
+                'daily_change': float(snapshot.daily_change or 0),
+                'daily_change_pct': float(snapshot.daily_change_pct or 0),
+            },
+            'positions': positions,
+            'positions_count': len(positions),
+            'broker_connected': False,
+            'source': 'database',
+            'snapshot_time': snapshot.timestamp.isoformat(),
+        })
 
 
 class RiskView(APIView):
@@ -278,12 +511,16 @@ class RiskView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        start_time = time.time()
+        logger.info("RiskView.get called")
         try:
             trading_client = get_trading_client()
             risk_manager = get_risk_manager()
 
             account = trading_client.get_account()
             if not account:
+                elapsed = time.time() - start_time
+                logger.warning(f"RiskView.get: account unavailable ({elapsed:.2f}s)")
                 return Response({
                     'risk_level': 'UNKNOWN',
                     'daily_trades': 0,
@@ -296,9 +533,16 @@ class RiskView(APIView):
 
             risk_status = risk_manager.get_risk_status(account)
             risk_status['broker_connected'] = True
+
+            elapsed = time.time() - start_time
+            logger.info(
+                f"RiskView.get completed in {elapsed:.2f}s: "
+                f"risk_level={risk_status.get('risk_level', 'N/A')}"
+            )
             return Response(risk_status)
         except Exception as e:
-            logger.error(f"Risk error: {e}")
+            elapsed = time.time() - start_time
+            logger.error(f"RiskView.get failed in {elapsed:.2f}s: {e}")
             return Response({
                 'risk_level': 'UNKNOWN',
                 'daily_trades': 0,
@@ -316,10 +560,15 @@ class MarketView(APIView):
     permission_classes = [AllowAny]  # Public endpoint
 
     def get(self, request):
+        start_time = time.time()
+        logger.debug("MarketView.get called")
         try:
             trading_client = get_trading_client()
             is_open = trading_client.is_market_open()
             hours = trading_client.get_market_hours()
+
+            elapsed = time.time() - start_time
+            logger.debug(f"MarketView.get completed in {elapsed:.2f}s: is_open={is_open}")
 
             return Response({
                 'is_open': is_open,
@@ -328,7 +577,8 @@ class MarketView(APIView):
                 'broker_connected': True,
             })
         except Exception as e:
-            logger.error(f"Market error: {e}")
+            elapsed = time.time() - start_time
+            logger.warning(f"MarketView.get failed in {elapsed:.2f}s: {e}")
             from datetime import datetime
             from zoneinfo import ZoneInfo
             now = datetime.now(ZoneInfo('America/New_York'))
@@ -350,6 +600,8 @@ class WatchlistView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        start_time = time.time()
+        logger.info("WatchlistView.get called")
         try:
             data_aggregator = get_data_aggregator()
             trading_config = settings.TRADING_CONFIG
@@ -363,9 +615,15 @@ class WatchlistView(APIView):
                     'price': prices.get(symbol, 0)
                 })
 
+            elapsed = time.time() - start_time
+            logger.info(
+                f"WatchlistView.get completed in {elapsed:.2f}s: "
+                f"{len(watchlist)} symbols"
+            )
             return Response({'watchlist': watchlist})
         except Exception as e:
-            logger.error(f"Watchlist error: {e}")
+            elapsed = time.time() - start_time
+            logger.error(f"WatchlistView.get failed in {elapsed:.2f}s: {e}")
             trading_config = settings.TRADING_CONFIG
             watchlist_symbols = trading_config.get('WATCHLIST', [])
             return Response({
@@ -375,14 +633,21 @@ class WatchlistView(APIView):
 
 
 class TradesView(APIView):
-    """Get recent trade history from IBKR."""
+    """Get recent trade history, with DB persistence and fallback."""
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        start_time = time.time()
+        logger.info("TradesView.get called")
+
         try:
             trading_client = get_trading_client()
             orders = trading_client.get_orders_history(limit=30)
+
+            # Sync to DB for persistence
+            user = request.user if request.user.is_authenticated else None
+            sync_trades_to_db(orders, user=user)
 
             trades = []
             for order in orders:
@@ -402,26 +667,74 @@ class TradesView(APIView):
                     'created_at': order.get('created_at'),
                 })
 
-            return Response({'trades': trades, 'broker_connected': True})
+            elapsed = time.time() - start_time
+            logger.info(
+                f"TradesView.get completed in {elapsed:.2f}s: "
+                f"{len(trades)} trades from broker"
+            )
+            return Response({
+                'trades': trades,
+                'broker_connected': True,
+                'source': 'ibkr_live',
+            })
+
         except Exception as e:
-            logger.error(f"Trades error: {e}")
-            return Response({'trades': [], 'broker_connected': False, 'error': str(e)})
+            elapsed = time.time() - start_time
+            logger.warning(
+                f"TradesView.get broker failed in {elapsed:.2f}s: {e}, "
+                f"falling back to DB"
+            )
+            return self._fallback_from_db(request)
+
+    def _fallback_from_db(self, request):
+        """Serve trade history from Django database when broker is unavailable."""
+        from trading_api.models import Trade
+
+        db_trades = Trade.objects.filter(
+            user=request.user
+        ).order_by('-created_at')[:30]
+
+        trades = []
+        for t in db_trades:
+            trades.append({
+                'id': t.order_id or str(t.id),
+                'symbol': t.symbol,
+                'action': t.action,
+                'quantity': t.quantity,
+                'filled_quantity': t.filled_qty or 0,
+                'order_type': t.order_type,
+                'status': t.status,
+                'limit_price': float(t.limit_price) if t.limit_price else None,
+                'filled_price': float(t.filled_avg_price) if t.filled_avg_price else None,
+                'created_at': t.created_at.isoformat() if t.created_at else None,
+            })
+
+        logger.info(f"TradesView fallback from DB: {len(trades)} trades")
+
+        return Response({
+            'trades': trades,
+            'broker_connected': False,
+            'source': 'database',
+        })
 
 
 class ConfigView(APIView):
     """Get trading configuration."""
-    
+
     permission_classes = [IsAuthenticated]
-    
+
     def get(self, request):
+        start_time = time.time()
+        logger.info("ConfigView.get called")
+
         trading_config = settings.TRADING_CONFIG
-        
+
         # Test TCP connection to IBKR
         import socket
         import os
         host = os.environ.get('IBKR_GATEWAY_HOST', '10.138.0.3')
         port = int(os.environ.get('IBKR_GATEWAY_PORT', '4002'))
-        
+
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(2)
         try:
@@ -435,6 +748,12 @@ class ConfigView(APIView):
         # Debug info for broker selection
         broker_type_env = os.environ.get('BROKER_TYPE', 'unknown')
         broker_name = get_broker_info()
+
+        elapsed = time.time() - start_time
+        logger.info(
+            f"ConfigView.get completed in {elapsed:.2f}s: "
+            f"broker={broker_name}, tcp={api_conn}"
+        )
 
         return Response({
             'broker': broker_name,
@@ -455,24 +774,26 @@ class ConfigView(APIView):
 
 class IndicatorsView(APIView):
     """Get technical indicators for watchlist symbols."""
-    
+
     permission_classes = [IsAuthenticated]
-    
+
     def get(self, request):
+        start_time = time.time()
+        logger.info("IndicatorsView.get called")
         try:
             import yfinance as yf
             from trading_api.services import get_technical_indicators
             TechnicalIndicators = get_technical_indicators()
-            
+
             trading_config = settings.TRADING_CONFIG
             top_symbols = trading_config['WATCHLIST'][:10]
-            
+
             def get_indicator_for_symbol(symbol):
                 """Get indicator data for a single symbol."""
                 try:
                     ticker = yf.Ticker(symbol)
                     df = ticker.history(period="3mo")
-                    
+
                     if df.empty or len(df) < 30:
                         return {
                             'symbol': symbol,
@@ -483,24 +804,24 @@ class IndicatorsView(APIView):
                             'macd_trend': 'NO DATA',
                             'overall_signal': 'NO DATA'
                         }
-                    
+
                     tech = TechnicalIndicators(df)
                     tech_data = tech.calculate_all()
-                    
+
                     current_price = float(df['Close'].iloc[-1]) if len(df) > 0 else 0
-                    
+
                     # Extract RSI
                     rsi = tech_data.get('rsi')
                     if rsi is not None and hasattr(rsi, 'iloc'):
                         rsi = float(rsi.iloc[-1]) if len(rsi) > 0 and not rsi.empty else None
-                    
+
                     rsi_signal = 'NEUTRAL'
                     if rsi is not None:
                         if rsi > 70:
                             rsi_signal = 'OVERBOUGHT'
                         elif rsi < 30:
                             rsi_signal = 'OVERSOLD'
-                    
+
                     # Extract MACD
                     macd = tech_data.get('macd')
                     macd_sig = tech_data.get('macd_signal')
@@ -508,21 +829,21 @@ class IndicatorsView(APIView):
                         macd = float(macd.iloc[-1]) if len(macd) > 0 and not macd.empty else None
                     if macd_sig is not None and hasattr(macd_sig, 'iloc'):
                         macd_sig = float(macd_sig.iloc[-1]) if len(macd_sig) > 0 else None
-                    
+
                     macd_trend = 'NEUTRAL'
                     if macd is not None and macd_sig is not None:
                         if macd > macd_sig:
                             macd_trend = 'BULLISH'
                         else:
                             macd_trend = 'BEARISH'
-                    
+
                     # Overall signal
                     overall = 'NEUTRAL'
                     if rsi_signal == 'OVERSOLD' or macd_trend == 'BULLISH':
                         overall = 'BULLISH'
                     elif rsi_signal == 'OVERBOUGHT' or macd_trend == 'BEARISH':
                         overall = 'BEARISH'
-                    
+
                     return {
                         'symbol': symbol,
                         'price': round(current_price, 2),
@@ -532,7 +853,7 @@ class IndicatorsView(APIView):
                         'macd_trend': macd_trend,
                         'overall_signal': overall
                     }
-                    
+
                 except Exception as e:
                     logger.error(f"Indicator error for {symbol}: {e}")
                     return {
@@ -544,15 +865,21 @@ class IndicatorsView(APIView):
                         'macd_trend': 'ERROR',
                         'overall_signal': 'ERROR'
                     }
-            
+
             # Use thread pool for parallel fetching
             with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
                 results = list(executor.map(get_indicator_for_symbol, top_symbols))
-            
+
+            elapsed = time.time() - start_time
+            logger.info(
+                f"IndicatorsView.get completed in {elapsed:.2f}s: "
+                f"{len(results)} indicators"
+            )
             return Response({'indicators': results})
-            
+
         except Exception as e:
-            logger.error(f"Indicators error: {e}")
+            elapsed = time.time() - start_time
+            logger.error(f"IndicatorsView.get failed in {elapsed:.2f}s: {e}")
             return Response({'error': str(e), 'indicators': []}, status=500)
 
 
@@ -566,10 +893,13 @@ class TestTradeView(APIView):
 
         Body: {"symbol": "AAPL", "action": "BUY", "quantity": 1}
         """
+        start_time = time.time()
         try:
             symbol = request.data.get('symbol', 'AAPL')
             action = request.data.get('action', 'BUY').upper()
             quantity = int(request.data.get('quantity', 1))
+
+            logger.info(f"TestTradeView.post called: {action} {quantity} {symbol}")
 
             if action not in ['BUY', 'SELL']:
                 return Response({'error': 'Action must be BUY or SELL'}, status=400)
@@ -589,8 +919,12 @@ class TestTradeView(APIView):
                 side=action.lower()
             )
 
+            elapsed = time.time() - start_time
             if order:
-                logger.info(f"TEST TRADE SUCCESS: Order ID {order.id}, Status: {order.status}")
+                logger.info(
+                    f"TEST TRADE SUCCESS in {elapsed:.2f}s: "
+                    f"Order ID {order.id}, Status: {order.status}"
+                )
                 return Response({
                     'status': 'success',
                     'message': f'Test trade executed: {action} {quantity} {symbol}',
@@ -605,13 +939,15 @@ class TestTradeView(APIView):
                     }
                 })
             else:
+                logger.error(f"TEST TRADE FAILED in {elapsed:.2f}s: order returned None")
                 return Response({
                     'status': 'failed',
                     'message': 'Order placement returned None'
                 }, status=500)
 
         except Exception as e:
-            logger.error(f"Test trade error: {e}", exc_info=True)
+            elapsed = time.time() - start_time
+            logger.error(f"TestTradeView.post failed in {elapsed:.2f}s: {e}", exc_info=True)
             return Response({'status': 'error', 'message': str(e)}, status=500)
 
 
@@ -621,6 +957,8 @@ class AnalyzeView(APIView):
     permission_classes = [AllowAny]  # Called by Cloud Scheduler
 
     def post(self, request):
+        start_time = time.time()
+        logger.info("AnalyzeView.post called")
         try:
             from trading_api.services import (
                 get_trading_analyst,
@@ -630,45 +968,53 @@ class AnalyzeView(APIView):
             TradingAnalyst = get_trading_analyst()
             OrderManager = get_order_manager()
             _, notify_trade = get_slack()
-            
+
             trading_client = get_trading_client()
-            
+
             # Check if market is open
             if not trading_client.is_market_open():
+                elapsed = time.time() - start_time
+                logger.info(f"AnalyzeView: market closed, skipping ({elapsed:.2f}s)")
                 return Response({
                     'status': 'skipped',
                     'message': 'Market is closed'
                 })
-            
+
             # Run analysis
             analyst = TradingAnalyst()
             order_manager = OrderManager()
-            
+
             account = trading_client.get_account()
             positions = trading_client.get_positions()
-            
+
             response = analyst.analyze_and_recommend(
                 cash=account['cash'],
                 portfolio_value=account['portfolio_value'],
                 positions=positions
             )
-            
+
             if not response:
+                elapsed = time.time() - start_time
+                logger.info(f"AnalyzeView: no LLM response ({elapsed:.2f}s)")
                 return Response({'status': 'no_response', 'message': 'No LLM response'})
-            
+
             # Filter and execute trades
             valid_trades = analyst.filter_by_confidence(response.trades)
-            
+
             if not valid_trades:
+                elapsed = time.time() - start_time
+                logger.info(
+                    f"AnalyzeView: no high-confidence trades ({elapsed:.2f}s)"
+                )
                 return Response({
                     'status': 'no_trades',
                     'message': 'No high-confidence trades',
                     'analysis': response.analysis_summary
                 })
-            
+
             # Execute trades
             executed = order_manager.execute_trades(valid_trades)
-            
+
             # Send Slack notifications
             for trade in valid_trades:
                 notify_trade({
@@ -678,7 +1024,13 @@ class AnalyzeView(APIView):
                     'confidence': trade.confidence,
                     'reasoning': trade.reasoning
                 })
-            
+
+            elapsed = time.time() - start_time
+            logger.info(
+                f"AnalyzeView.post completed in {elapsed:.2f}s: "
+                f"{len(executed)} trades executed"
+            )
+
             return Response({
                 'status': 'success',
                 'trades_executed': len(executed),
@@ -690,7 +1042,8 @@ class AnalyzeView(APIView):
             })
 
         except Exception as e:
-            logger.error(f"Analysis error: {e}")
+            elapsed = time.time() - start_time
+            logger.error(f"AnalyzeView.post failed in {elapsed:.2f}s: {e}")
             return Response({'status': 'error', 'message': str(e)}, status=500)
 
 
@@ -700,6 +1053,8 @@ class DailySummaryView(APIView):
     permission_classes = [AllowAny]  # Called by Cloud Scheduler
 
     def post(self, request):
+        start_time = time.time()
+        logger.info("DailySummaryView.post called")
         try:
             from datetime import date
             from src.utils.email_notifier import send_daily_summary
@@ -713,6 +1068,8 @@ class DailySummaryView(APIView):
             positions = trading_client.get_positions()
 
             if not account:
+                elapsed = time.time() - start_time
+                logger.error(f"DailySummaryView: account unavailable ({elapsed:.2f}s)")
                 return Response({'status': 'error', 'message': 'Failed to get account'}, status=500)
 
             # Calculate daily change
@@ -741,15 +1098,14 @@ class DailySummaryView(APIView):
                         'quantity': order.get('qty'),
                         'filled_price': order.get('filled_avg_price'),
                         'created_at': created,
-                        'confidence': 0.8,  # Default, actual confidence not stored in order
+                        'confidence': 0.8,
                     })
 
             # Get risk status
             risk_status = risk_manager.get_risk_status(account)
 
-            # Estimate analysis runs (based on scheduler: every 30 min from 9-4 = ~14 runs)
-            # For accurate count, we'd need to track in database
-            analysis_runs = 14  # Approximate
+            # Estimate analysis runs
+            analysis_runs = 14
 
             # Send email
             email_sent = send_daily_summary(portfolio, trades_today, analysis_runs, risk_status)
@@ -763,6 +1119,12 @@ class DailySummaryView(APIView):
                 'positions_count': len(positions),
             })
 
+            elapsed = time.time() - start_time
+            logger.info(
+                f"DailySummaryView.post completed in {elapsed:.2f}s: "
+                f"email_sent={email_sent}, trades_today={len(trades_today)}"
+            )
+
             return Response({
                 'status': 'success',
                 'email_sent': email_sent,
@@ -772,5 +1134,6 @@ class DailySummaryView(APIView):
             })
 
         except Exception as e:
-            logger.error(f"Daily summary error: {e}", exc_info=True)
+            elapsed = time.time() - start_time
+            logger.error(f"DailySummaryView.post failed in {elapsed:.2f}s: {e}", exc_info=True)
             return Response({'status': 'error', 'message': str(e)}, status=500)
