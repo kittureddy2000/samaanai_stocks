@@ -453,7 +453,15 @@ class IBKRBroker(BaseBroker):
             return None
 
     def get_orders_history(self, limit: int = 50) -> List[Order]:
-        """Get recent order history from IBKR."""
+        """Get recent order history from IBKR.
+
+        Uses three sources for comprehensive trade history:
+        1. ib.trades() — current session trades (includes pending/submitted)
+        2. ib.reqExecutions() — historical executions from IBKR servers (up to 7 days)
+        3. ib.fills() — completed fills from current session
+
+        Results are deduplicated by order ID and sorted by time descending.
+        """
         start = time.time()
         logger.debug(f"IBKR get_orders_history called: limit={limit}")
         try:
@@ -461,37 +469,115 @@ class IBKRBroker(BaseBroker):
                 logger.error("IBKR get_orders_history: not connected")
                 return []
 
-            trades = self.ib.trades()
+            seen_ids = set()
             orders = []
 
-            for trade in trades[:limit]:
-                # Get the order creation time from the log if available
-                created_time = None
-                if trade.log and len(trade.log) > 0:
-                    # The first log entry typically contains the submission time
-                    created_time = trade.log[0].time if hasattr(trade.log[0], 'time') else None
+            # Source 1: Current session trades (includes pending orders)
+            try:
+                trades = self.ib.trades()
+                logger.info(f"IBKR trades() returned {len(trades)} session trades")
+                for trade in trades:
+                    order_id = str(trade.order.orderId)
+                    if order_id in seen_ids:
+                        continue
+                    seen_ids.add(order_id)
 
-                # If no log time, use current time as fallback
-                if created_time is None:
-                    created_time = datetime.now(timezone.utc)
+                    created_time = None
+                    if trade.log and len(trade.log) > 0:
+                        created_time = trade.log[0].time if hasattr(trade.log[0], 'time') else None
+                    if created_time is None:
+                        created_time = datetime.now(timezone.utc)
 
-                orders.append(Order(
-                    id=str(trade.order.orderId),
-                    symbol=trade.contract.symbol,
-                    side=trade.order.action.lower(),
-                    qty=trade.order.totalQuantity,
-                    order_type=trade.order.orderType.lower(),
-                    status=trade.orderStatus.status.lower(),
-                    limit_price=trade.order.lmtPrice if hasattr(trade.order, 'lmtPrice') else None,
-                    filled_qty=trade.orderStatus.filled,
-                    filled_price=trade.orderStatus.avgFillPrice if trade.orderStatus.avgFillPrice else None,
-                    created_at=created_time
-                ))
+                    orders.append(Order(
+                        id=order_id,
+                        symbol=trade.contract.symbol,
+                        side=trade.order.action.lower(),
+                        qty=trade.order.totalQuantity,
+                        order_type=trade.order.orderType.lower(),
+                        status=trade.orderStatus.status.lower(),
+                        limit_price=trade.order.lmtPrice if hasattr(trade.order, 'lmtPrice') else None,
+                        filled_qty=trade.orderStatus.filled,
+                        filled_price=trade.orderStatus.avgFillPrice if trade.orderStatus.avgFillPrice else None,
+                        created_at=created_time
+                    ))
+            except Exception as e:
+                logger.warning(f"IBKR trades() failed: {e}")
+
+            # Source 2: Historical executions from IBKR servers (up to 7 days)
+            try:
+                from ib_insync import ExecutionFilter
+                exec_filter = ExecutionFilter()
+                executions = self.ib.reqExecutions(exec_filter)
+                logger.info(f"IBKR reqExecutions() returned {len(executions)} historical fills")
+                for fill in executions:
+                    order_id = str(fill.execution.orderId)
+                    if order_id in seen_ids:
+                        continue
+                    seen_ids.add(order_id)
+
+                    exec_time = fill.execution.time if hasattr(fill.execution, 'time') else None
+                    if exec_time and isinstance(exec_time, str):
+                        try:
+                            exec_time = datetime.fromisoformat(exec_time)
+                        except (ValueError, TypeError):
+                            exec_time = datetime.now(timezone.utc)
+
+                    orders.append(Order(
+                        id=order_id,
+                        symbol=fill.contract.symbol,
+                        side=fill.execution.side.lower(),
+                        qty=fill.execution.shares,
+                        order_type='market',  # executions don't carry order type
+                        status='filled',
+                        limit_price=None,
+                        filled_qty=fill.execution.shares,
+                        filled_price=fill.execution.price,
+                        created_at=exec_time
+                    ))
+            except Exception as e:
+                logger.warning(f"IBKR reqExecutions() failed: {e}")
+                logger.debug(traceback.format_exc())
+
+            # Source 3: Completed fills from current session
+            try:
+                fills = self.ib.fills()
+                logger.info(f"IBKR fills() returned {len(fills)} session fills")
+                for fill in fills:
+                    order_id = str(fill.execution.orderId)
+                    if order_id in seen_ids:
+                        continue
+                    seen_ids.add(order_id)
+
+                    exec_time = fill.execution.time if hasattr(fill.execution, 'time') else None
+                    if exec_time and isinstance(exec_time, str):
+                        try:
+                            exec_time = datetime.fromisoformat(exec_time)
+                        except (ValueError, TypeError):
+                            exec_time = datetime.now(timezone.utc)
+
+                    orders.append(Order(
+                        id=order_id,
+                        symbol=fill.contract.symbol,
+                        side=fill.execution.side.lower(),
+                        qty=fill.execution.shares,
+                        order_type='market',
+                        status='filled',
+                        limit_price=None,
+                        filled_qty=fill.execution.shares,
+                        filled_price=fill.execution.price,
+                        created_at=exec_time
+                    ))
+            except Exception as e:
+                logger.warning(f"IBKR fills() failed: {e}")
+
+            # Sort by created_at descending and limit
+            orders.sort(key=lambda o: o.created_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+            orders = orders[:limit]
 
             elapsed = time.time() - start
             logger.info(
                 f"IBKR get_orders_history: {len(orders)} orders "
-                f"(from {len(trades)} total) in {elapsed:.2f}s"
+                f"(deduped from {len(seen_ids)} unique IDs) in {elapsed:.2f}s"
             )
             return orders
         except Exception as e:

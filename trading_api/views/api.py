@@ -684,11 +684,11 @@ class TradesView(APIView):
             if t['id'] not in broker_ids:
                 merged_trades.append(t)
 
-        # Sort by created_at descending, limit to 30
+        # Sort by created_at descending, limit to 50
         merged_trades.sort(
             key=lambda t: t.get('created_at') or '', reverse=True
         )
-        merged_trades = merged_trades[:30]
+        merged_trades = merged_trades[:50]
 
         source = 'ibkr_live' if broker_trades else ('database' if db_trades else 'none')
 
@@ -706,12 +706,26 @@ class TradesView(APIView):
         })
 
     def _get_db_trades(self, user):
-        """Get trade history from the Django database."""
+        """Get trade history from the Django database.
+
+        Fetches trades for the current user AND trades with no user (synced
+        before authentication or from background tasks). This ensures trades
+        are never lost due to user mismatch.
+        """
         from trading_api.models import Trade
+        from django.db.models import Q
+
+        # Get trades for this user OR trades with no user assigned
+        if user:
+            trade_filter = Q(user=user) | Q(user__isnull=True)
+        else:
+            trade_filter = Q(user__isnull=True)
 
         db_trades = Trade.objects.filter(
-            user=user
-        ).order_by('-created_at')[:30]
+            trade_filter
+        ).order_by('-created_at')[:50]
+
+        logger.debug(f"_get_db_trades: found {len(db_trades)} trades in DB (user={user})")
 
         trades = []
         for t in db_trades:
