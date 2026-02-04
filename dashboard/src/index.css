@@ -810,3 +810,501 @@ td {
     gap: 8px;
   }
 }
+
+/* ============================================================
+   NAVIGATION TABS
+   ============================================================ */
+
+.nav-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 28px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.nav-tab {
+  padding: 12px 28px;
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  color: var(--text-secondary);
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: inherit;
+}
+
+.nav-tab:hover {
+  color: var(--text-primary);
+  background: var(--glass);
+}
+
+.nav-tab.active {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent-blue);
+}
+
+/* ============================================================
+   OPTION CHAIN PAGE
+   ============================================================ */
+
+.option-chain-page {
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+/* Header row */
+.oc-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+
+.oc-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--accent-yellow);
+  margin-bottom: 8px;
+}
+
+.oc-title {
+  font-size: 36px;
+  font-weight: 800;
+  line-height: 1.15;
+  color: var(--text-primary);
+  margin-bottom: 10px;
+}
+
+.oc-subtitle {
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+  max-width: 480px;
+}
+
+/* Data source card */
+.oc-source-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 20px 28px;
+  min-width: 260px;
+  flex-shrink: 0;
+}
+
+.oc-source-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.oc-source-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.oc-source-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+}
+
+.oc-source-dot.active {
+  background: var(--accent-green);
+  box-shadow: 0 0 10px var(--accent-green);
+}
+
+.oc-source-detail {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* Form card */
+.oc-form-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 24px 28px;
+  margin-bottom: 24px;
+}
+
+.oc-form-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 0.8fr auto;
+  gap: 16px;
+  align-items: end;
+}
+
+.oc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.oc-field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+}
+
+.oc-field input,
+.oc-field select {
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  color: var(--text-primary);
+  font-size: 15px;
+  font-family: inherit;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.oc-field input:focus,
+.oc-field select:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px rgba(77, 166, 255, 0.15);
+}
+
+.oc-field select {
+  cursor: pointer;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238b8b9e' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 36px;
+}
+
+.oc-btn-fetch {
+  padding: 12px 36px;
+  background: linear-gradient(135deg, #ffd93d, #f5a623);
+  border: none;
+  border-radius: 10px;
+  color: #0a0a0f;
+  font-size: 15px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  white-space: nowrap;
+  letter-spacing: 0.3px;
+}
+
+.oc-btn-fetch:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 24px rgba(255, 217, 61, 0.35);
+}
+
+.oc-btn-fetch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.oc-form-error {
+  margin-top: 14px;
+  padding: 12px 16px;
+  background: rgba(255, 71, 87, 0.1);
+  border: 1px solid rgba(255, 71, 87, 0.3);
+  border-radius: 10px;
+  color: var(--accent-red);
+  font-size: 13px;
+}
+
+/* Loading */
+.oc-loading {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.oc-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--border-color);
+  border-top-color: var(--accent-yellow);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Grid */
+.oc-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+/* Cards */
+.oc-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 24px;
+}
+
+.oc-card h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 18px;
+}
+
+/* Chart tooltip */
+.chart-tooltip {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-size: 13px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.chart-tooltip-title {
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: var(--text-primary);
+}
+
+.chart-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  color: var(--text-primary);
+}
+
+.chart-tooltip-row.dim {
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.chart-tooltip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+/* Table card */
+.oc-table-card {
+  overflow: hidden;
+}
+
+.oc-stock-price {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.oc-price-value {
+  color: var(--accent-green);
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.oc-strike-info {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.oc-table-scroll {
+  max-height: 360px;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+
+.oc-table-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.oc-table-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.oc-table-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+/* Option table */
+.oc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.oc-table thead {
+  position: sticky;
+  top: 0;
+  background: var(--bg-card);
+  z-index: 2;
+}
+
+.oc-table th {
+  padding: 10px 8px;
+  text-align: right;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border-color);
+  white-space: nowrap;
+}
+
+.oc-table th:first-child {
+  text-align: left;
+}
+
+.oc-table td {
+  padding: 10px 8px;
+  text-align: right;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  font-variant-numeric: tabular-nums;
+}
+
+.oc-table td:first-child {
+  text-align: left;
+}
+
+.oc-table tbody tr {
+  transition: background 0.15s;
+}
+
+.oc-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.oc-table tbody tr.near-expiry {
+  border-left: 2px solid var(--accent-yellow);
+}
+
+.oc-exp-cell {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.iv-cell {
+  color: var(--accent-yellow);
+  font-weight: 600;
+}
+
+.warn {
+  color: var(--accent-yellow);
+  font-weight: 600;
+}
+
+/* Greek values */
+.greek {
+  font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+  font-size: 12px;
+}
+
+.greek.pos {
+  color: var(--accent-green);
+}
+
+.greek.neg {
+  color: var(--accent-red);
+}
+
+/* Empty / initial state */
+.oc-empty-state {
+  text-align: center;
+  padding: 80px 20px;
+  color: var(--text-secondary);
+}
+
+.oc-empty-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.4;
+}
+
+.oc-empty-state p {
+  font-size: 15px;
+  max-width: 420px;
+  margin: 0 auto;
+  line-height: 1.6;
+}
+
+.oc-empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+/* ============================================================
+   OPTION CHAIN RESPONSIVE
+   ============================================================ */
+
+@media (max-width: 1200px) {
+  .oc-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .oc-form-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .oc-btn-fetch {
+    grid-column: span 2;
+  }
+
+  .oc-header-row {
+    flex-direction: column;
+  }
+
+  .oc-source-card {
+    min-width: unset;
+    width: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  .oc-form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .oc-btn-fetch {
+    grid-column: span 1;
+  }
+
+  .oc-title {
+    font-size: 26px;
+  }
+
+  .nav-tabs {
+    overflow-x: auto;
+  }
+
+  .nav-tab {
+    padding: 10px 20px;
+    font-size: 14px;
+  }
+}

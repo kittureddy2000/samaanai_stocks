@@ -910,6 +910,150 @@ class IndicatorsView(APIView):
             return Response({'error': str(e), 'indicators': []}, status=500)
 
 
+class OptionChainView(APIView):
+    """Get option chain data for a symbol at a specific strike across all expirations."""
+
+    permission_classes = [AllowAny]  # Public endpoint using free yfinance data
+
+    def get(self, request):
+        start_time = time.time()
+
+        symbol = request.GET.get('symbol', '').upper()
+        strike_str = request.GET.get('strike')
+        option_type = request.GET.get('type', 'call').lower()
+
+        if not symbol:
+            return Response({'error': 'symbol parameter is required'}, status=400)
+        if not strike_str:
+            return Response({'error': 'strike parameter is required'}, status=400)
+        if option_type not in ('call', 'put'):
+            return Response({'error': 'type must be "call" or "put"'}, status=400)
+
+        try:
+            strike = float(strike_str)
+        except ValueError:
+            return Response({'error': 'strike must be a valid number'}, status=400)
+
+        logger.info(f"OptionChainView.get: {symbol} ${strike} {option_type}")
+
+        try:
+            import yfinance as yf
+            from datetime import datetime as dt
+            from src.utils.greeks import black_scholes_greeks
+
+            ticker = yf.Ticker(symbol)
+
+            # Current stock price
+            current_price = None
+            try:
+                info = ticker.info
+                current_price = info.get('regularMarketPrice') or info.get('currentPrice')
+                if not current_price:
+                    hist = ticker.history(period='1d')
+                    current_price = float(hist['Close'].iloc[-1]) if len(hist) > 0 else None
+            except Exception as e:
+                logger.warning(f"OptionChainView: could not get price for {symbol}: {e}")
+
+            # All expiration dates
+            try:
+                expirations = ticker.options
+            except Exception:
+                return Response(
+                    {'error': f'No options data available for {symbol}'},
+                    status=404,
+                )
+
+            if not expirations:
+                return Response(
+                    {'error': f'No option expirations found for {symbol}'},
+                    status=404,
+                )
+
+            logger.info(f"OptionChainView: {len(expirations)} expirations for {symbol}")
+
+            risk_free_rate = 0.045  # ~4.5 % US Treasury approximation
+            options_data = []
+
+            for exp_date in expirations:
+                try:
+                    chain = ticker.option_chain(exp_date)
+                    df = chain.calls if option_type == 'call' else chain.puts
+
+                    # Find exact or closest strike
+                    strike_match = df[df['strike'] == strike]
+                    if strike_match.empty:
+                        if df.empty:
+                            continue
+                        closest_idx = (df['strike'] - strike).abs().idxmin()
+                        strike_match = df.loc[[closest_idx]]
+                    actual_strike = float(strike_match['strike'].iloc[0])
+
+                    row = strike_match.iloc[0]
+                    last_price = float(row.get('lastPrice', 0) or 0)
+                    bid = float(row.get('bid', 0) or 0)
+                    ask = float(row.get('ask', 0) or 0)
+                    volume = int(row.get('volume', 0) or 0)
+                    open_interest = int(row.get('openInterest', 0) or 0)
+                    implied_vol = float(row.get('impliedVolatility', 0) or 0)
+
+                    exp_datetime = dt.strptime(exp_date, '%Y-%m-%d')
+                    days_to_expiry = (exp_datetime - dt.now()).days
+                    time_to_expiry = max(days_to_expiry, 0) / 365.0
+
+                    # Greeks via Black-Scholes
+                    greeks = {'delta': None, 'gamma': None, 'theta': None, 'vega': None}
+                    if current_price and implied_vol > 0 and time_to_expiry > 0:
+                        greeks = black_scholes_greeks(
+                            option_type=option_type,
+                            stock_price=current_price,
+                            strike_price=actual_strike,
+                            time_to_expiry=time_to_expiry,
+                            risk_free_rate=risk_free_rate,
+                            implied_volatility=implied_vol,
+                        )
+
+                    options_data.append({
+                        'expiration': exp_date,
+                        'days_to_expiry': days_to_expiry,
+                        'strike': actual_strike,
+                        'last_price': last_price,
+                        'bid': bid,
+                        'ask': ask,
+                        'volume': volume,
+                        'open_interest': open_interest,
+                        'implied_volatility': round(implied_vol * 100, 2),
+                        'delta': greeks.get('delta'),
+                        'gamma': greeks.get('gamma'),
+                        'theta': greeks.get('theta'),
+                        'vega': greeks.get('vega'),
+                    })
+                except Exception as e:
+                    logger.warning(f"OptionChainView: error for {exp_date}: {e}")
+                    continue
+
+            options_data.sort(key=lambda x: x['expiration'])
+
+            elapsed = time.time() - start_time
+            logger.info(
+                f"OptionChainView.get completed in {elapsed:.2f}s: "
+                f"{symbol} ${strike} {option_type}, {len(options_data)} expirations"
+            )
+
+            return Response({
+                'symbol': symbol,
+                'strike': strike,
+                'type': option_type,
+                'current_price': current_price,
+                'options': options_data,
+                'count': len(options_data),
+            })
+
+        except Exception as e:
+            elapsed = time.time() - start_time
+            logger.error(f"OptionChainView.get failed in {elapsed:.2f}s: {e}", exc_info=True)
+            return Response({'error': f'Failed to fetch option chain: {str(e)}'}, status=500)
+
+
 class TestTradeView(APIView):
     """Execute a test trade to verify trading functionality."""
 

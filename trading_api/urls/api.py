@@ -27,7 +27,10 @@ urlpatterns = [
     
     # Technical indicators
     path('indicators', api.IndicatorsView.as_view(), name='api-indicators'),
-    
+
+    # Option chain data (public, uses yfinance)
+    path('option-chain', api.OptionChainView.as_view(), name='api-option-chain'),
+
     # Trigger analysis (for Cloud Scheduler)
     path('analyze', api.AnalyzeView.as_view(), name='api-analyze'),
 

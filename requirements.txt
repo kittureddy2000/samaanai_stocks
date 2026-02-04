@@ -32,6 +32,7 @@ google-genai>=1.0.0
 pandas>=2.0.0
 numpy>=1.24.0
 yfinance>=0.2.0
+scipy>=1.11.0  # Black-Scholes Greeks computation for options
 # pandas-ta causes build issues, using native pandas implementations
 
 # Scheduling (for local development)

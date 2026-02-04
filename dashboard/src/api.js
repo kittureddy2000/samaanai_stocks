@@ -71,5 +71,12 @@ export const getIndicators = async () => {
     return response.data;
 };
 
+export const getOptionChain = async (symbol, strike, type) => {
+    const response = await api.get('/api/option-chain', {
+        params: { symbol, strike, type }
+    });
+    return response.data;
+};
+
 export default api;
 
