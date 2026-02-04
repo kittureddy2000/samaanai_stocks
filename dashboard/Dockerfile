@@ -12,6 +12,9 @@ RUN npm ci
 # Copy source
 COPY . .
 
+# Set API URL for production build (Vite embeds at build time)
+ENV VITE_API_URL=https://api.trading.samaanai.com
+
 # Build for production
 RUN npm run build
 
