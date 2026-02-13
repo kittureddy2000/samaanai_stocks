@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { getPortfolio, getRisk, getMarket, getWatchlist, getTrades, getConfig, getIndicators, getCurrentUser, getLoginUrl, getLogoutUrl, register, login, getOptionChain, getCollarStrategy, addToWatchlist, removeFromWatchlist, setTokens, clearTokens, getAccessToken } from './api';
+import { getPortfolio, getRisk, getMarket, getWatchlist, getTrades, getConfig, getIndicators, getCurrentUser, getLoginUrl, register, login, logout, getOptionChain, getCollarStrategy, addToWatchlist, removeFromWatchlist, setTokens } from './api';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import './App.css';
 
@@ -97,8 +97,24 @@ function OptionChainPage() {
       const result = await getOptionChain(formData.symbol, formData.strike, formData.type);
       setData(result);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to fetch option chain data');
-      setData(null);
+      // Fallback: show chain data even if LLM recommendation times out.
+      try {
+        const fallback = await getOptionChain(
+          formData.symbol,
+          formData.strike,
+          formData.type,
+          false
+        );
+        fallback.recommendation_error = 'LLM recommendation timed out. Showing live chain data only.';
+        setData(fallback);
+      } catch (fallbackErr) {
+        setError(
+          fallbackErr.response?.data?.error ||
+          err.response?.data?.error ||
+          'Failed to fetch option chain data'
+        );
+        setData(null);
+      }
     } finally {
       setLoading(false);
     }
@@ -814,9 +830,16 @@ function App() {
     checkAuth();
   }, [checkAuth]);
 
+  const handleLogout = useCallback(async () => {
+    await logout();
+    setUser(null);
+    setAuthChecked(true);
+    setCurrentPage('dashboard');
+  }, []);
+
   const fetchData = useCallback(async () => {
     try {
-      const [portfolioData, riskData, marketData, watchlistData, tradesData, configData] = await Promise.all([
+      const results = await Promise.allSettled([
         getPortfolio(),
         getRisk(),
         getMarket(),
@@ -825,12 +848,44 @@ function App() {
         getConfig(),
       ]);
 
-      setPortfolio(portfolioData);
-      setRisk(riskData);
-      setMarket(marketData);
-      setWatchlist(watchlistData.watchlist || []);
-      setTrades(tradesData.trades || []);
-      setConfig(configData);
+      const [portfolioRes, riskRes, marketRes, watchlistRes, tradesRes, configRes] = results;
+
+      if (portfolioRes.status === 'fulfilled') {
+        setPortfolio(portfolioRes.value);
+      } else {
+        console.error('Portfolio fetch failed:', portfolioRes.reason);
+      }
+
+      if (riskRes.status === 'fulfilled') {
+        setRisk(riskRes.value);
+      } else {
+        console.error('Risk fetch failed:', riskRes.reason);
+      }
+
+      if (marketRes.status === 'fulfilled') {
+        setMarket(marketRes.value);
+      } else {
+        console.error('Market fetch failed:', marketRes.reason);
+      }
+
+      if (watchlistRes.status === 'fulfilled') {
+        setWatchlist(watchlistRes.value.watchlist || []);
+      } else {
+        console.error('Watchlist fetch failed:', watchlistRes.reason);
+      }
+
+      if (tradesRes.status === 'fulfilled') {
+        setTrades(tradesRes.value.trades || []);
+      } else {
+        console.error('Trades fetch failed:', tradesRes.reason);
+      }
+
+      if (configRes.status === 'fulfilled') {
+        setConfig(configRes.value);
+      } else {
+        console.error('Config fetch failed:', configRes.reason);
+      }
+
       setLastUpdated(new Date().toLocaleTimeString());
       setLoading(false);
 
@@ -963,7 +1018,7 @@ function App() {
                 </div>
                 <div className="profile-divider"></div>
                 {/* Logout */}
-                <button onClick={() => { clearTokens(); window.location.href = getLogoutUrl(); }} className="profile-logout">
+                <button onClick={handleLogout} className="profile-logout">
                   Sign Out
                 </button>
               </div>

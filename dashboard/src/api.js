@@ -17,7 +17,7 @@ export const clearTokens = () => {
 
 const api = axios.create({
     baseURL: API_BASE,
-    timeout: 10000,
+    timeout: 30000,
     withCredentials: true, // Important for cookies/sessions
 });
 
@@ -69,6 +69,17 @@ export const login = async (email, password) => {
 
 export const getLoginUrl = () => `${API_BASE}/auth/google`;
 export const getLogoutUrl = () => `${API_BASE}/auth/logout`;
+export const logout = async () => {
+    try {
+        const refresh = getRefreshToken();
+        await api.post('/auth/logout', { refresh });
+    } catch (error) {
+        // Clear local tokens even if server logout fails.
+        console.warn('Logout request failed, clearing local session anyway.', error);
+    } finally {
+        clearTokens();
+    }
+};
 
 // Data functions
 export const getPortfolio = async () => {
@@ -108,7 +119,8 @@ export const getIndicators = async () => {
 
 export const getOptionChain = async (symbol, strike, type, withRecommendation = true) => {
     const response = await api.get('/api/option-chain', {
-        params: { symbol, strike, type, with_recommendation: withRecommendation }
+        params: { symbol, strike, type, with_recommendation: withRecommendation },
+        timeout: 60000,
     });
     return response.data;
 };
