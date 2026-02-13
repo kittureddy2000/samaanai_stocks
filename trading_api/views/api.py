@@ -974,36 +974,57 @@ class AgentStatusView(APIView):
         start_time = time.time()
         logger.info("AgentStatusView.get called")
 
-        from django.db.models import Count, Sum, Q
-        from trading_api.models.trade import AgentRunLog
+        try:
+            from django.db.models import Count, Sum, Q
+            from trading_api.models.trade import AgentRunLog
 
-        now = timezone.now()
-        since_24h = now - timedelta(hours=24)
+            now = timezone.now()
+            since_24h = now - timedelta(hours=24)
 
-        analyze_qs = AgentRunLog.objects.filter(run_type='analyze')
-        recent_qs = analyze_qs.order_by('-created_at')
-        last_run = recent_qs.first()
-        last_trade_run = recent_qs.filter(trades_executed__gt=0).first()
-        last_llm_issue = AgentRunLog.objects.filter(
-            run_type__in=['analyze', 'option_chain'],
-            llm_ok=False
-        ).order_by('-created_at').first()
+            analyze_qs = AgentRunLog.objects.filter(run_type='analyze')
+            recent_qs = analyze_qs.order_by('-created_at')
+            last_run = recent_qs.first()
+            last_trade_run = recent_qs.filter(trades_executed__gt=0).first()
+            last_llm_issue = AgentRunLog.objects.filter(
+                run_type__in=['analyze', 'option_chain'],
+                llm_ok=False
+            ).order_by('-created_at').first()
 
-        stats_24h = analyze_qs.filter(created_at__gte=since_24h).aggregate(
-            runs=Count('id'),
-            success_runs=Count('id', filter=Q(status='success')),
-            no_trade_runs=Count('id', filter=Q(status='no_trades')),
-            skipped_runs=Count('id', filter=Q(status='skipped')),
-            error_runs=Count('id', filter=Q(status='error')),
-            no_response_runs=Count('id', filter=Q(status='no_response')),
-            llm_failures=Count('id', filter=Q(llm_ok=False)),
-            trades_executed=Sum('trades_executed'),
-        )
+            stats_24h = analyze_qs.filter(created_at__gte=since_24h).aggregate(
+                runs=Count('id'),
+                success_runs=Count('id', filter=Q(status='success')),
+                no_trade_runs=Count('id', filter=Q(status='no_trades')),
+                skipped_runs=Count('id', filter=Q(status='skipped')),
+                error_runs=Count('id', filter=Q(status='error')),
+                no_response_runs=Count('id', filter=Q(status='no_response')),
+                llm_failures=Count('id', filter=Q(llm_ok=False)),
+                trades_executed=Sum('trades_executed'),
+            )
 
-        recent_runs = [
-            self._serialize_run(run)
-            for run in recent_qs[:20]
-        ]
+            recent_runs = [
+                self._serialize_run(run)
+                for run in recent_qs[:20]
+            ]
+        except Exception as e:
+            logger.warning(f"AgentStatusView.get migration/DB issue: {e}")
+            return Response({
+                'status': 'unavailable',
+                'reason': 'agent_run_logs table is not ready',
+                'last_run': None,
+                'last_trade_run': None,
+                'last_llm_issue': None,
+                'last_24h': {
+                    'runs': 0,
+                    'success_runs': 0,
+                    'no_trade_runs': 0,
+                    'skipped_runs': 0,
+                    'error_runs': 0,
+                    'no_response_runs': 0,
+                    'llm_failures': 0,
+                    'trades_executed': 0,
+                },
+                'recent_runs': [],
+            })
 
         elapsed = time.time() - start_time
         logger.info(f"AgentStatusView.get completed in {elapsed:.2f}s")
