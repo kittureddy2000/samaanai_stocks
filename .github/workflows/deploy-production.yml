@@ -75,6 +75,15 @@ jobs:
             --format='get(networkInterfaces[0].networkIP)' 2>/dev/null || echo "10.138.0.2")
           echo "ip=$IBKR_IP" >> $GITHUB_OUTPUT
 
+      - name: Clear legacy Gemini env var type (one-time safety)
+        run: |
+          # If GEMINI_API_KEY was previously configured as plain env var, Cloud Run
+          # rejects switching it to a Secret Manager binding in the same deploy.
+          gcloud run services update $BACKEND_SERVICE \
+            --region=$GCP_REGION \
+            --remove-env-vars=GEMINI_API_KEY \
+            --quiet || true
+
       - name: Deploy to Cloud Run
         id: deploy
         uses: google-github-actions/deploy-cloudrun@v2
