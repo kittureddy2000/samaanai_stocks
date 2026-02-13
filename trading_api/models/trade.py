@@ -155,3 +155,59 @@ class PositionSnapshot(models.Model):
 
     def __str__(self):
         return f"{self.symbol}: {self.qty} shares @ {self.timestamp}"
+
+
+class AgentRunLog(models.Model):
+    """Operational audit log for scheduled runs and recommendation events."""
+
+    RUN_TYPE_CHOICES = [
+        ('analyze', 'Analyze'),
+        ('option_chain', 'Option Chain'),
+        ('daily_summary', 'Daily Summary'),
+    ]
+
+    STATUS_CHOICES = [
+        ('success', 'Success'),
+        ('no_trades', 'No Trades'),
+        ('no_response', 'No Response'),
+        ('skipped', 'Skipped'),
+        ('fallback', 'Fallback'),
+        ('error', 'Error'),
+    ]
+
+    run_type = models.CharField(max_length=32, choices=RUN_TYPE_CHOICES, db_index=True)
+    status = models.CharField(max_length=32, choices=STATUS_CHOICES, db_index=True)
+    message = models.TextField(blank=True)
+
+    # Execution diagnostics
+    duration_ms = models.IntegerField(null=True, blank=True)
+    market_open = models.BooleanField(null=True, blank=True)
+    llm_ok = models.BooleanField(null=True, blank=True, db_index=True)
+    llm_error = models.TextField(blank=True)
+
+    # Trading diagnostics
+    trades_recommended = models.IntegerField(null=True, blank=True)
+    trades_executed = models.IntegerField(null=True, blank=True)
+
+    # Option recommendation diagnostics
+    symbol = models.CharField(max_length=20, null=True, blank=True)
+    option_type = models.CharField(max_length=10, null=True, blank=True)
+    strike = models.DecimalField(max_digits=15, decimal_places=4, null=True, blank=True)
+    recommendation_source = models.CharField(max_length=32, null=True, blank=True)
+    recommendation_candidates = models.IntegerField(null=True, blank=True)
+
+    # Extra context (small JSON payload)
+    details = models.JSONField(default=dict, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'agent_run_logs'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['run_type', 'created_at']),
+            models.Index(fields=['status', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.run_type}:{self.status} @ {self.created_at}"

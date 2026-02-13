@@ -239,6 +239,54 @@ def save_portfolio_snapshot(account, positions, user=None):
         return None
 
 
+def record_agent_run(
+    *,
+    run_type,
+    status,
+    start_time=None,
+    message='',
+    duration_ms=None,
+    market_open=None,
+    llm_ok=None,
+    llm_error='',
+    trades_recommended=None,
+    trades_executed=None,
+    symbol=None,
+    option_type=None,
+    strike=None,
+    recommendation_source=None,
+    recommendation_candidates=None,
+    details=None,
+):
+    """Persist run diagnostics to Cloud SQL without interrupting request flow."""
+    from trading_api.models.trade import AgentRunLog
+
+    try:
+        resolved_duration_ms = duration_ms
+        if resolved_duration_ms is None and start_time is not None:
+            resolved_duration_ms = int(max(0, (time.time() - start_time) * 1000))
+
+        AgentRunLog.objects.create(
+            run_type=run_type,
+            status=status,
+            message=message or '',
+            duration_ms=resolved_duration_ms,
+            market_open=market_open,
+            llm_ok=llm_ok,
+            llm_error=llm_error or '',
+            trades_recommended=trades_recommended,
+            trades_executed=trades_executed,
+            symbol=symbol,
+            option_type=option_type,
+            strike=strike,
+            recommendation_source=recommendation_source,
+            recommendation_candidates=recommendation_candidates,
+            details=details or {},
+        )
+    except Exception as e:
+        logger.error(f"Failed to record agent run log: {e}")
+
+
 def should_save_snapshot(user):
     """Check if enough time has passed since last snapshot (5 min minimum)."""
     from trading_api.models import PortfolioSnapshot
@@ -894,6 +942,90 @@ class TradesView(APIView):
         return trades
 
 
+class AgentStatusView(APIView):
+    """Operational health for scheduler runs, LLM, and trade execution."""
+
+    permission_classes = [IsAuthenticated]
+
+    @staticmethod
+    def _serialize_run(run):
+        if not run:
+            return None
+        return {
+            'id': run.id,
+            'run_type': run.run_type,
+            'status': run.status,
+            'message': run.message,
+            'duration_ms': run.duration_ms,
+            'market_open': run.market_open,
+            'llm_ok': run.llm_ok,
+            'llm_error': run.llm_error,
+            'trades_recommended': run.trades_recommended,
+            'trades_executed': run.trades_executed,
+            'symbol': run.symbol,
+            'option_type': run.option_type,
+            'strike': float(run.strike) if run.strike is not None else None,
+            'recommendation_source': run.recommendation_source,
+            'recommendation_candidates': run.recommendation_candidates,
+            'created_at': run.created_at.isoformat() if run.created_at else None,
+        }
+
+    def get(self, request):
+        start_time = time.time()
+        logger.info("AgentStatusView.get called")
+
+        from django.db.models import Count, Sum, Q
+        from trading_api.models.trade import AgentRunLog
+
+        now = timezone.now()
+        since_24h = now - timedelta(hours=24)
+
+        analyze_qs = AgentRunLog.objects.filter(run_type='analyze')
+        recent_qs = analyze_qs.order_by('-created_at')
+        last_run = recent_qs.first()
+        last_trade_run = recent_qs.filter(trades_executed__gt=0).first()
+        last_llm_issue = AgentRunLog.objects.filter(
+            run_type__in=['analyze', 'option_chain'],
+            llm_ok=False
+        ).order_by('-created_at').first()
+
+        stats_24h = analyze_qs.filter(created_at__gte=since_24h).aggregate(
+            runs=Count('id'),
+            success_runs=Count('id', filter=Q(status='success')),
+            no_trade_runs=Count('id', filter=Q(status='no_trades')),
+            skipped_runs=Count('id', filter=Q(status='skipped')),
+            error_runs=Count('id', filter=Q(status='error')),
+            no_response_runs=Count('id', filter=Q(status='no_response')),
+            llm_failures=Count('id', filter=Q(llm_ok=False)),
+            trades_executed=Sum('trades_executed'),
+        )
+
+        recent_runs = [
+            self._serialize_run(run)
+            for run in recent_qs[:20]
+        ]
+
+        elapsed = time.time() - start_time
+        logger.info(f"AgentStatusView.get completed in {elapsed:.2f}s")
+
+        return Response({
+            'last_run': self._serialize_run(last_run),
+            'last_trade_run': self._serialize_run(last_trade_run),
+            'last_llm_issue': self._serialize_run(last_llm_issue),
+            'last_24h': {
+                'runs': stats_24h.get('runs') or 0,
+                'success_runs': stats_24h.get('success_runs') or 0,
+                'no_trade_runs': stats_24h.get('no_trade_runs') or 0,
+                'skipped_runs': stats_24h.get('skipped_runs') or 0,
+                'error_runs': stats_24h.get('error_runs') or 0,
+                'no_response_runs': stats_24h.get('no_response_runs') or 0,
+                'llm_failures': stats_24h.get('llm_failures') or 0,
+                'trades_executed': stats_24h.get('trades_executed') or 0,
+            },
+            'recent_runs': recent_runs,
+        })
+
+
 class ConfigView(APIView):
     """Get trading configuration."""
 
@@ -1380,9 +1512,12 @@ class OptionChainView(APIView):
                         candidates=sell_candidates
                     )
                     if recommendation and recommendation_error:
+                        compact_error = str(recommendation_error).strip().replace('\n', ' ')
+                        if len(compact_error) > 220:
+                            compact_error = compact_error[:217] + '...'
                         recommendation['reasoning'] = (
                             recommendation['reasoning'] +
-                            f" LLM unavailable: {recommendation_error}"
+                            f" LLM unavailable: {compact_error}"
                         )
 
             elapsed = time.time() - start_time
@@ -1390,6 +1525,34 @@ class OptionChainView(APIView):
                 f"OptionChainView.get completed in {elapsed:.2f}s: "
                 f"{symbol} ${strike} {option_type}, {len(options_data)} expirations"
             )
+
+            if with_recommendation:
+                recommendation_source = None
+                if recommendation:
+                    recommendation_source = recommendation.get('generated_by', 'llm')
+                recommendation_status = 'no_response'
+                if recommendation_source == 'heuristic':
+                    recommendation_status = 'fallback'
+                elif recommendation:
+                    recommendation_status = 'success'
+                record_agent_run(
+                    run_type='option_chain',
+                    status=recommendation_status,
+                    start_time=start_time,
+                    message='Option recommendation generated',
+                    llm_ok=not bool(recommendation_error),
+                    llm_error=recommendation_error or '',
+                    symbol=symbol,
+                    option_type=str(recommendation.get('option_type', '')) if recommendation else None,
+                    strike=recommendation.get('strike') if recommendation else strike,
+                    recommendation_source=recommendation_source,
+                    recommendation_candidates=len(sell_candidates),
+                    details={
+                        'requested_option_type': option_type,
+                        'requested_strike': strike,
+                        'expirations_returned': len(options_data),
+                    },
+                )
 
             return Response({
                 'symbol': symbol,
@@ -1406,6 +1569,18 @@ class OptionChainView(APIView):
         except Exception as e:
             elapsed = time.time() - start_time
             logger.error(f"OptionChainView.get failed in {elapsed:.2f}s: {e}", exc_info=True)
+            if with_recommendation:
+                record_agent_run(
+                    run_type='option_chain',
+                    status='error',
+                    start_time=start_time,
+                    message='Option chain failed',
+                    llm_ok=False,
+                    llm_error=str(e),
+                    symbol=symbol,
+                    option_type=option_type.upper(),
+                    strike=strike_str,
+                )
             return Response({'error': f'Failed to fetch option chain: {str(e)}'}, status=500)
 
 
@@ -1682,6 +1857,16 @@ class AnalyzeView(APIView):
             if not trading_client.is_market_open():
                 elapsed = time.time() - start_time
                 logger.info(f"AnalyzeView: market closed, skipping ({elapsed:.2f}s)")
+                record_agent_run(
+                    run_type='analyze',
+                    status='skipped',
+                    start_time=start_time,
+                    message='Market is closed',
+                    market_open=False,
+                    llm_ok=None,
+                    trades_recommended=0,
+                    trades_executed=0,
+                )
                 return Response({
                     'status': 'skipped',
                     'message': 'Market is closed'
@@ -1703,6 +1888,18 @@ class AnalyzeView(APIView):
             if not response:
                 elapsed = time.time() - start_time
                 logger.info(f"AnalyzeView: no LLM response ({elapsed:.2f}s)")
+                llm_error = getattr(analyst.llm_client, 'last_error', '') if analyst else ''
+                record_agent_run(
+                    run_type='analyze',
+                    status='no_response',
+                    start_time=start_time,
+                    message='No LLM response',
+                    market_open=True,
+                    llm_ok=False,
+                    llm_error=llm_error,
+                    trades_recommended=0,
+                    trades_executed=0,
+                )
                 return Response({'status': 'no_response', 'message': 'No LLM response'})
 
             # Filter and execute trades
@@ -1712,6 +1909,17 @@ class AnalyzeView(APIView):
                 elapsed = time.time() - start_time
                 logger.info(
                     f"AnalyzeView: no high-confidence trades ({elapsed:.2f}s)"
+                )
+                record_agent_run(
+                    run_type='analyze',
+                    status='no_trades',
+                    start_time=start_time,
+                    message='No high-confidence trades',
+                    market_open=True,
+                    llm_ok=True,
+                    trades_recommended=len(response.trades),
+                    trades_executed=0,
+                    details={'analysis_summary': response.analysis_summary},
                 )
                 return Response({
                     'status': 'no_trades',
@@ -1738,6 +1946,18 @@ class AnalyzeView(APIView):
                 f"{len(executed)} trades executed"
             )
 
+            record_agent_run(
+                run_type='analyze',
+                status='success',
+                start_time=start_time,
+                message=f"{len(executed)} trades executed",
+                market_open=True,
+                llm_ok=True,
+                trades_recommended=len(valid_trades),
+                trades_executed=len(executed),
+                details={'analysis_summary': response.analysis_summary},
+            )
+
             return Response({
                 'status': 'success',
                 'trades_executed': len(executed),
@@ -1751,6 +1971,14 @@ class AnalyzeView(APIView):
         except Exception as e:
             elapsed = time.time() - start_time
             logger.error(f"AnalyzeView.post failed in {elapsed:.2f}s: {e}")
+            record_agent_run(
+                run_type='analyze',
+                status='error',
+                start_time=start_time,
+                message='Analyze run failed',
+                llm_ok=False,
+                llm_error=str(e),
+            )
             return Response({'status': 'error', 'message': str(e)}, status=500)
 
 
@@ -1777,6 +2005,13 @@ class DailySummaryView(APIView):
             if not account:
                 elapsed = time.time() - start_time
                 logger.error(f"DailySummaryView: account unavailable ({elapsed:.2f}s)")
+                record_agent_run(
+                    run_type='daily_summary',
+                    status='error',
+                    start_time=start_time,
+                    message='Failed to get account',
+                    llm_ok=None,
+                )
                 return Response({'status': 'error', 'message': 'Failed to get account'}, status=500)
 
             # Calculate daily change
@@ -1832,6 +2067,22 @@ class DailySummaryView(APIView):
                 f"email_sent={email_sent}, trades_today={len(trades_today)}"
             )
 
+            record_agent_run(
+                run_type='daily_summary',
+                status='success' if email_sent else 'error',
+                start_time=start_time,
+                message='Daily summary email processed',
+                llm_ok=None,
+                trades_recommended=analysis_runs,
+                trades_executed=len(trades_today),
+                details={
+                    'email_sent': bool(email_sent),
+                    'email_enabled': bool(email_notifier.enabled),
+                    'recipients_configured': len(email_notifier.to_emails),
+                    'portfolio_value': account['portfolio_value'],
+                },
+            )
+
             return Response({
                 'status': 'success',
                 'email_sent': email_sent,
@@ -1847,4 +2098,12 @@ class DailySummaryView(APIView):
         except Exception as e:
             elapsed = time.time() - start_time
             logger.error(f"DailySummaryView.post failed in {elapsed:.2f}s: {e}", exc_info=True)
+            record_agent_run(
+                run_type='daily_summary',
+                status='error',
+                start_time=start_time,
+                message='Daily summary failed',
+                llm_ok=None,
+                llm_error=str(e),
+            )
             return Response({'status': 'error', 'message': str(e)}, status=500)

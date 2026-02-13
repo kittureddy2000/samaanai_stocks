@@ -21,6 +21,9 @@ urlpatterns = [
     
     # Trade history
     path('trades', api.TradesView.as_view(), name='api-trades'),
+
+    # Agent run health/history
+    path('agent-status', api.AgentStatusView.as_view(), name='api-agent-status'),
     
     # Trading configuration
     path('config', api.ConfigView.as_view(), name='api-config'),
@@ -30,6 +33,9 @@ urlpatterns = [
 
     # Option chain data (public, uses yfinance)
     path('option-chain', api.OptionChainView.as_view(), name='api-option-chain'),
+
+    # Collar strategy calculator (public, uses yfinance)
+    path('collar-strategy', api.CollarStrategyView.as_view(), name='api-collar-strategy'),
 
     # Trigger analysis (for Cloud Scheduler)
     path('analyze', api.AnalyzeView.as_view(), name='api-analyze'),

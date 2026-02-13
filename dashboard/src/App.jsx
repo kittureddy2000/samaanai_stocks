@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { getPortfolio, getRisk, getMarket, getWatchlist, getTrades, getConfig, getIndicators, getCurrentUser, getLoginUrl, register, login, logout, getOptionChain, getCollarStrategy, addToWatchlist, removeFromWatchlist, setTokens } from './api';
+import { getPortfolio, getRisk, getMarket, getWatchlist, getTrades, getAgentStatus, getConfig, getIndicators, getCurrentUser, getLoginUrl, register, login, logout, getOptionChain, getCollarStrategy, addToWatchlist, removeFromWatchlist, setTokens } from './api';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import './App.css';
 
@@ -732,6 +732,7 @@ function App() {
   const [market, setMarket] = useState(null);
   const [watchlist, setWatchlist] = useState([]);
   const [trades, setTrades] = useState([]);
+  const [agentStatus, setAgentStatus] = useState(null);
   const [config, setConfig] = useState(null);
   const [indicators, setIndicators] = useState([]);
   const [lastUpdated, setLastUpdated] = useState(null);
@@ -845,10 +846,11 @@ function App() {
         getMarket(),
         getWatchlist(),
         getTrades(),
+        getAgentStatus(),
         getConfig(),
       ]);
 
-      const [portfolioRes, riskRes, marketRes, watchlistRes, tradesRes, configRes] = results;
+      const [portfolioRes, riskRes, marketRes, watchlistRes, tradesRes, agentStatusRes, configRes] = results;
 
       if (portfolioRes.status === 'fulfilled') {
         setPortfolio(portfolioRes.value);
@@ -878,6 +880,12 @@ function App() {
         setTrades(tradesRes.value.trades || []);
       } else {
         console.error('Trades fetch failed:', tradesRes.reason);
+      }
+
+      if (agentStatusRes.status === 'fulfilled') {
+        setAgentStatus(agentStatusRes.value);
+      } else {
+        console.error('Agent status fetch failed:', agentStatusRes.reason);
       }
 
       if (configRes.status === 'fulfilled') {
@@ -940,6 +948,19 @@ function App() {
   const totalPLPercent = totalCostBasis > 0 ? (totalUnrealizedPL / totalCostBasis) * 100 : 0;
   const visibleIndicators = indicators.filter((ind) => ind?.overall_signal !== 'ERROR');
   const indicatorFeedDown = indicators.length > 0 && visibleIndicators.length === 0;
+  const lastAgentRun = agentStatus?.last_run;
+  const lastTradeRun = agentStatus?.last_trade_run;
+  const runsLast24h = agentStatus?.last_24h?.runs || 0;
+  const tradesExecuted24h = agentStatus?.last_24h?.trades_executed || 0;
+  const llmFailures24h = agentStatus?.last_24h?.llm_failures || 0;
+  const llmHealthy = llmFailures24h === 0;
+  const llmStatusText = llmHealthy ? 'Healthy' : `${llmFailures24h} failure${llmFailures24h === 1 ? '' : 's'} in 24h`;
+  const agentLastRunText = lastAgentRun?.created_at
+    ? `${new Date(lastAgentRun.created_at).toLocaleString()} (${lastAgentRun.status})`
+    : 'No analyze runs yet';
+  const lastTradeRunText = lastTradeRun?.created_at
+    ? new Date(lastTradeRun.created_at).toLocaleString()
+    : 'No recent executions';
 
   return (
     <div className="dashboard">
@@ -1070,6 +1091,20 @@ function App() {
               <div className="dash-status-detail">
                 {portfolio?.positions?.length || 0} positions &middot; {formatCurrency(portfolio?.account?.portfolio_value || 0)}
               </div>
+              <div className="dash-agent-line">
+                <span>Agent runs (24h)</span>
+                <strong>{runsLast24h}</strong>
+              </div>
+              <div className="dash-agent-line">
+                <span>Trades executed (24h)</span>
+                <strong>{tradesExecuted24h}</strong>
+              </div>
+              <div className="dash-agent-line">
+                <span>LLM status</span>
+                <strong className={llmHealthy ? 'positive' : 'negative'}>{llmStatusText}</strong>
+              </div>
+              <div className="dash-agent-footnote">Last analyze run: {agentLastRunText}</div>
+              <div className="dash-agent-footnote">Last trade execution: {lastTradeRunText}</div>
             </div>
           </div>
 

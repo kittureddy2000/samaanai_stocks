@@ -1105,6 +1105,27 @@ td {
 .dash-status-detail {
   font-size: 12px;
   color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+.dash-agent-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding-top: 6px;
+}
+
+.dash-agent-line strong {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.dash-agent-footnote {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
 }
 
 /* Card label (above h2) */

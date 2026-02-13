@@ -108,6 +108,11 @@ export const getTrades = async () => {
     return response.data;
 };
 
+export const getAgentStatus = async () => {
+    const response = await api.get('/api/agent-status');
+    return response.data;
+};
+
 export const getConfig = async () => {
     const response = await api.get('/api/config');
     return response.data;
