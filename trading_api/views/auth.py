@@ -8,6 +8,7 @@ import re
 import logging
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.shortcuts import redirect
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -188,18 +189,39 @@ class LoginView(APIView):
 
 class LogoutView(APIView):
     """Logout the current user by blacklisting the refresh token."""
-    
+
     permission_classes = [IsAuthenticated]
-    
+
+    def get(self, request):
+        """Handle GET requests - logout and redirect to frontend."""
+        self._do_logout_internal(request, refresh_token=None)
+        # Redirect to frontend login page
+        frontend_url = getattr(settings, 'FRONTEND_URL', 'https://trading.samaanai.com')
+        return redirect(frontend_url)
+
     def post(self, request):
+        """Handle POST requests with optional refresh token to blacklist."""
+        refresh_token = request.data.get('refresh')
+        return self._do_logout(request, refresh_token=refresh_token)
+
+    def _do_logout_internal(self, request, refresh_token=None):
+        """Perform logout without returning response."""
         try:
-            refresh_token = request.data.get('refresh')
             if refresh_token:
                 token = RefreshToken(refresh_token)
                 token.blacklist()
-            
+        except Exception as e:
+            logger.error(f"Logout error: {e}")
+
+    def _do_logout(self, request, refresh_token=None):
+        """Perform logout - blacklist token if provided."""
+        try:
+            if refresh_token:
+                token = RefreshToken(refresh_token)
+                token.blacklist()
+
             return Response({'success': True, 'message': 'Logged out successfully'})
-            
+
         except Exception as e:
             logger.error(f"Logout error: {e}")
             return Response({'success': True, 'message': 'Logged out'})
