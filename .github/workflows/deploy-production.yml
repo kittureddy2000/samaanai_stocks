@@ -131,7 +131,7 @@ jobs:
           echo "✅ Backend deployed to: ${{ steps.deploy.outputs.url }}"
 
   deploy-frontend:
-    name: Deploy React Frontend
+    name: Deploy Dashboard Frontend
     runs-on: ubuntu-latest
     needs: deploy-backend
 
@@ -157,12 +157,12 @@ jobs:
             --region=$GCP_REGION --format='value(status.url)')
           echo "url=$BACKEND_URL" >> $GITHUB_OUTPUT
 
-      - name: Build Frontend with production API URL
-        working-directory: frontend
+      - name: Build Dashboard with production API URL
+        working-directory: dashboard
         run: |
-          # Use custom domain for API (SSL is now ready)
-          echo "REACT_APP_API_URL=https://api.trading.samaanai.com" > .env.production
-          docker build -t gcr.io/$GCP_PROJECT/$FRONTEND_SERVICE:${{ github.sha }} .
+          docker build \
+            --build-arg VITE_API_URL=https://api.trading.samaanai.com \
+            -t gcr.io/$GCP_PROJECT/$FRONTEND_SERVICE:${{ github.sha }} .
           docker push gcr.io/$GCP_PROJECT/$FRONTEND_SERVICE:${{ github.sha }}
 
       - name: Deploy to Cloud Run

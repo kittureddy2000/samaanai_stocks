@@ -79,7 +79,7 @@ jobs:
           echo "✅ Backend deployed to: $(gcloud run services describe $BACKEND_SERVICE --region=$GCP_REGION --format='value(status.url)')"
 
   deploy-frontend:
-    name: Deploy React Frontend
+    name: Deploy Dashboard Frontend
     runs-on: ubuntu-latest
     needs: deploy-backend
     
@@ -104,15 +104,12 @@ jobs:
           BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE --region=$GCP_REGION --format='value(status.url)')
           echo "url=$BACKEND_URL" >> $GITHUB_OUTPUT
       
-      - name: Update API URL in Frontend
-        working-directory: frontend
-        run: |
-          echo "REACT_APP_API_URL=${{ steps.backend-url.outputs.url }}" > .env.production
-      
       - name: Build and Push Docker image
-        working-directory: frontend
+        working-directory: dashboard
         run: |
-          docker build -t gcr.io/$GCP_PROJECT/$FRONTEND_SERVICE:${{ github.sha }} .
+          docker build \
+            --build-arg VITE_API_URL=${{ steps.backend-url.outputs.url }} \
+            -t gcr.io/$GCP_PROJECT/$FRONTEND_SERVICE:${{ github.sha }} .
           docker push gcr.io/$GCP_PROJECT/$FRONTEND_SERVICE:${{ github.sha }}
       
       - name: Deploy to Cloud Run

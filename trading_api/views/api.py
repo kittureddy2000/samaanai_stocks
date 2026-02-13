@@ -1692,7 +1692,7 @@ class DailySummaryView(APIView):
         logger.info("DailySummaryView.post called")
         try:
             from datetime import date
-            from src.utils.email_notifier import send_daily_summary
+            from src.utils.email_notifier import send_daily_summary, email_notifier
             from trading_api.services import get_slack
 
             trading_client = get_trading_client()
@@ -1763,7 +1763,11 @@ class DailySummaryView(APIView):
             return Response({
                 'status': 'success',
                 'email_sent': email_sent,
+                'email_enabled': bool(email_notifier.enabled),
+                'email_recipients_configured': len(email_notifier.to_emails),
                 'portfolio_value': account['portfolio_value'],
+                'daily_change': daily_change,
+                'daily_change_pct': daily_change_pct,
                 'trades_today': len(trades_today),
                 'positions': len(positions),
             })
