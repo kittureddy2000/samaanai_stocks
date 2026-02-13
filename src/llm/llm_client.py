@@ -176,3 +176,98 @@ class LLMClient:
         except Exception as e:
             logger.error(f"Gemini connection failed: {e}")
             return False
+
+    def recommend_option_to_sell(
+        self,
+        symbol: str,
+        current_price: float,
+        candidates: list[Dict[str, Any]],
+        max_retries: int = 2
+    ) -> Optional[Dict[str, Any]]:
+        """Recommend the best option contract to sell (call or put).
+
+        Args:
+            symbol: Underlying stock symbol
+            current_price: Current underlying price
+            candidates: Option candidates with liquidity/greeks/premium fields
+            max_retries: Retry count for transient API errors
+
+        Returns:
+            Recommendation dict or None if analysis fails
+        """
+        import time
+
+        if not candidates:
+            return None
+
+        # Keep prompt compact and deterministic
+        ranked = sorted(
+            candidates,
+            key=lambda c: (
+                float(c.get('open_interest', 0) or 0),
+                float(c.get('volume', 0) or 0),
+                float(c.get('premium', 0) or 0),
+            ),
+            reverse=True
+        )[:30]
+
+        prompt = (
+            "You are an options income analyst. Pick ONE best option to SELL now.\n"
+            "Goal: premium capture with reasonable assignment/risk balance.\n"
+            "Allowed choice: CALL or PUT.\n"
+            "Assume SELL CALL is covered-call style and SELL PUT is cash-secured.\n"
+            "Prefer liquid contracts and avoid extreme risk.\n\n"
+            f"Underlying: {symbol}\n"
+            f"Current Price: {current_price}\n"
+            f"Candidates JSON: {json.dumps(ranked)}\n\n"
+            "Return strict JSON only with this schema:\n"
+            "{\n"
+            '  "option_type": "CALL" | "PUT",\n'
+            '  "expiration": "YYYY-MM-DD",\n'
+            '  "strike": <number>,\n'
+            '  "premium": <number>,\n'
+            '  "confidence": <0.0-1.0>,\n'
+            '  "reasoning": "<short rationale>"\n'
+            "}"
+        )
+
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    wait_time = 4 * (2 ** attempt)
+                    logger.info(
+                        f"Retrying option recommendation ({attempt + 1}/{max_retries}) "
+                        f"after {wait_time}s"
+                    )
+                    time.sleep(wait_time)
+
+                response = self.client.models.generate_content(
+                    model=self.model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.2,
+                        response_mime_type="application/json"
+                    )
+                )
+
+                parsed = json.loads(response.text)
+                option_type = str(parsed.get('option_type', '')).upper().strip()
+                if option_type not in ('CALL', 'PUT'):
+                    option_type = 'CALL'
+
+                recommendation = {
+                    'option_type': option_type,
+                    'expiration': str(parsed.get('expiration', '')).strip(),
+                    'strike': float(parsed.get('strike', 0) or 0),
+                    'premium': float(parsed.get('premium', 0) or 0),
+                    'confidence': float(parsed.get('confidence', 0) or 0),
+                    'reasoning': str(parsed.get('reasoning', '')).strip(),
+                }
+                return recommendation
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Option recommendation failed on attempt {attempt + 1}: {e}")
+
+        logger.error(f"Option recommendation failed after retries: {last_error}")
+        return None

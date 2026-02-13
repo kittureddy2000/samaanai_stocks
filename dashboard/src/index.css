@@ -1,15 +1,16 @@
 :root {
-  --bg-primary: #0a0a0f;
-  --bg-secondary: #12121a;
-  --bg-card: #1a1a24;
-  --accent-green: #00d9a5;
-  --accent-red: #ff4757;
-  --accent-blue: #4da6ff;
-  --accent-yellow: #ffd93d;
-  --text-primary: #ffffff;
-  --text-secondary: #8b8b9e;
-  --border-color: #2a2a3a;
-  --glass: rgba(255, 255, 255, 0.05);
+  --bg-primary: #08161f;
+  --bg-secondary: #102532;
+  --bg-card: #0f2130;
+  --accent-green: #26d69a;
+  --accent-red: #ff6b6b;
+  --accent-blue: #3aa9ff;
+  --accent-yellow: #ffcf5b;
+  --text-primary: #e8f3fb;
+  --text-secondary: #9ab2c4;
+  --border-color: #1f3a4b;
+  --glass: rgba(215, 236, 252, 0.06);
+  --shadow-lg: 0 18px 48px rgba(3, 10, 16, 0.42);
 }
 
 * {
@@ -19,16 +20,32 @@
 }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  background: var(--bg-primary);
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  background:
+    radial-gradient(circle at 8% 0%, rgba(58, 169, 255, 0.16), transparent 40%),
+    radial-gradient(circle at 92% 0%, rgba(255, 207, 91, 0.14), transparent 34%),
+    linear-gradient(180deg, #07131b 0%, #091e29 50%, #07151f 100%);
   color: var(--text-primary);
   min-height: 100vh;
+  letter-spacing: 0.01em;
 }
 
 .dashboard {
-  padding: 20px;
+  padding: 24px;
   max-width: 1600px;
   margin: 0 auto;
+  animation: fade-up 0.45s ease-out;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Header */
@@ -36,8 +53,8 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20px 0;
-  margin-bottom: 20px;
+  padding: 16px 0 24px;
+  margin-bottom: 24px;
   border-bottom: 1px solid var(--border-color);
 }
 
@@ -48,9 +65,11 @@ body {
 }
 
 .header-left h1 {
-  font-size: 24px;
+  font-family: 'Sora', sans-serif;
+  font-size: 26px;
   font-weight: 700;
-  background: linear-gradient(90deg, var(--accent-green), var(--accent-blue));
+  letter-spacing: 0.03em;
+  background: linear-gradient(90deg, #82d4ff, #4ec5ff 52%, #ffd380);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -60,10 +79,12 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 16px;
+  padding: 10px 16px;
   background: var(--glass);
-  border-radius: 20px;
-  font-size: 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  border: 1px solid var(--border-color);
+  backdrop-filter: blur(8px);
 }
 
 .status-dot {
@@ -103,47 +124,49 @@ body {
 }
 
 .btn-refresh {
-  padding: 10px 20px;
-  background: linear-gradient(135deg, var(--accent-blue), #6366f1);
+  padding: 10px 18px;
+  background: linear-gradient(135deg, #178fe2, #21a5ff);
   border: none;
-  border-radius: 8px;
+  border-radius: 10px;
   color: white;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
   transition: transform 0.2s, box-shadow 0.2s;
 }
 
 .btn-refresh:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 20px rgba(77, 166, 255, 0.3);
+  box-shadow: 0 8px 22px rgba(58, 169, 255, 0.3);
 }
 
 /* Main Grid */
 .main-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
 }
 
 /* Cards */
 .card {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 16px;
-  padding: 24px;
-  transition: transform 0.2s, box-shadow 0.2s;
+  border-radius: 18px;
+  padding: 22px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+  transition: border-color 0.24s, box-shadow 0.24s, transform 0.24s;
 }
 
 .card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+  border-color: rgba(58, 169, 255, 0.4);
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-1px);
 }
 
 .card h2 {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  margin-bottom: 20px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 14px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -151,22 +174,22 @@ body {
 
 /* Portfolio Card */
 .portfolio-card {
-  grid-column: span 2;
+  grid-column: span 1;
 }
 
 .portfolio-value {
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .portfolio-value .label {
   display: block;
   color: var(--text-secondary);
-  font-size: 14px;
-  margin-bottom: 8px;
+  font-size: 12px;
+  margin-bottom: 6px;
 }
 
 .portfolio-value .value {
-  font-size: 48px;
+  font-size: 32px;
   font-weight: 700;
   background: linear-gradient(90deg, var(--accent-green), #00f5c4);
   -webkit-background-clip: text;
@@ -177,24 +200,24 @@ body {
 .portfolio-stats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
+  gap: 10px;
 }
 
 .stat {
-  padding: 16px;
+  padding: 10px 12px;
   background: var(--glass);
-  border-radius: 12px;
+  border-radius: 10px;
 }
 
 .stat .label {
   display: block;
   color: var(--text-secondary);
-  font-size: 12px;
-  margin-bottom: 8px;
+  font-size: 10px;
+  margin-bottom: 4px;
 }
 
 .stat .value {
-  font-size: 18px;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -215,8 +238,8 @@ body {
 }
 
 .risk-dot {
-  width: 16px;
-  height: 16px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
 }
 
@@ -236,79 +259,127 @@ body {
 }
 
 .risk-text {
-  font-size: 24px;
+  font-size: 16px;
   font-weight: 700;
 }
 
 .risk-stats {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-}
-
-/* Watchlist Card */
-.watchlist {
-  display: grid;
   gap: 8px;
 }
 
-.watchlist-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 16px;
-  background: var(--glass);
-  border-radius: 8px;
-  transition: background 0.2s;
+/* Watchlist Card — full width table */
+.watchlist-card {
+  grid-column: span 2;
 }
 
-.watchlist-item:hover {
-  background: rgba(255, 255, 255, 0.08);
+.watchlist-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
-.watchlist-item .symbol {
-  font-weight: 600;
+.watchlist-table thead {
+  position: sticky;
+  top: 0;
+  background: var(--bg-card);
+  z-index: 2;
 }
 
-.watchlist-item .price {
-  font-weight: 500;
-  color: var(--accent-green);
+.watchlist-table th {
+  padding: 8px 10px;
+  text-align: right;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border-color);
+  white-space: nowrap;
+}
+
+.watchlist-table th:first-child {
+  text-align: left;
+}
+
+.watchlist-table td {
+  padding: 10px 10px;
+  text-align: right;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  font-size: 12px;
+}
+
+.watchlist-table td:first-child {
+  text-align: left;
+}
+
+.watchlist-table tbody tr {
+  transition: background 0.15s;
+}
+
+.watchlist-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
 }
 
 /* Positions Card - Full width */
 .positions-card {
-  grid-column: span 3;
+  grid-column: span 2;
 }
 
 .positions {
-  display: grid;
-  gap: 12px;
+  overflow-x: auto;
 }
 
-.position-item {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  padding: 16px;
-  background: var(--glass);
-  border-radius: 12px;
+/* Positions table (brokerage-style) */
+.positions-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
-.position-item>div {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.positions-table thead {
+  position: sticky;
+  top: 0;
+  background: var(--bg-card);
+  z-index: 2;
 }
 
-.position-item .label {
-  font-size: 11px;
+.positions-table th {
+  padding: 8px 10px;
+  text-align: right;
   color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
   text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border-color);
+  white-space: nowrap;
 }
 
-.position-item .value {
-  font-size: 16px;
-  font-weight: 600;
+.positions-table th:first-child {
+  text-align: left;
+}
+
+.positions-table td {
+  padding: 10px 10px;
+  text-align: right;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  font-size: 12px;
+}
+
+.positions-table td:first-child {
+  text-align: left;
+}
+
+.positions-table tbody tr {
+  transition: background 0.15s;
+}
+
+.positions-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .empty-state {
@@ -317,7 +388,7 @@ body {
   padding: 40px;
 }
 
-/* Trades Card - 2 columns */
+/* Trades Card — full width */
 .trades-card {
   grid-column: span 2;
 }
@@ -333,20 +404,21 @@ table {
 
 th,
 td {
-  padding: 12px 16px;
+  padding: 8px 10px;
   text-align: left;
   border-bottom: 1px solid var(--border-color);
 }
 
 th {
   color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 10px;
+  font-weight: 600;
   text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 td {
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .action-buy {
@@ -401,10 +473,7 @@ td {
   background: rgba(255, 71, 87, 0.2);
 }
 
-/* Config Card - pairs with watchlist */
-.config-card {
-  grid-column: span 2;
-}
+/* Config Grid (used in profile dropdown) */
 
 .config-grid {
   display: grid;
@@ -440,13 +509,20 @@ td {
 /* Responsive */
 @media (max-width: 1200px) {
   .main-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: 1fr 1fr;
   }
 
-  .portfolio-card,
-  .positions-card,
-  .trades-card {
+  .positions-card {
     grid-column: span 2;
+  }
+
+  .dash-header-row {
+    flex-direction: column;
+  }
+
+  .dash-status-card {
+    min-width: unset;
+    width: 100%;
   }
 }
 
@@ -457,8 +533,9 @@ td {
 
   .portfolio-card,
   .positions-card,
-  .trades-card {
-    grid-column: span 1;
+  .trades-card,
+  .watchlist-card {
+    grid-column: span 1 !important;
   }
 
   .portfolio-stats {
@@ -471,30 +548,31 @@ td {
   }
 
   .portfolio-value .value {
-    font-size: 32px;
+    font-size: 24px;
+  }
+
+  .dash-title {
+    font-size: 22px;
+  }
+
+  /* Profile dropdown: full-width overlay on mobile */
+  .profile-dropdown {
+    position: fixed;
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    border-radius: 16px 16px 0 0;
+    max-height: 80vh;
+    overflow-y: auto;
   }
 }
 
-/* Enhanced Position Item */
-.position-item {
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 12px;
-  padding: 16px;
-  background: var(--glass);
-  border-radius: 12px;
-  border-left: 3px solid var(--accent-blue);
-}
-
-@media (max-width: 1200px) {
-  .position-item {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
+/* Positions table responsive */
 @media (max-width: 768px) {
-  .position-item {
-    grid-template-columns: repeat(2, 1fr);
+  .positions {
+    margin: 0 -8px;
   }
 }
 
@@ -538,30 +616,9 @@ td {
   color: var(--accent-red);
 }
 
-/* Watchlist More */
-.watchlist-more {
-  text-align: center;
-  padding: 8px;
-  color: var(--text-secondary);
-  font-size: 12px;
-}
+/* (Watchlist uses table now, old .watchlist-more removed) */
 
-/* Indicators Card at bottom */
-.indicators-card {
-  grid-column: span 3;
-}
-
-@media (max-width: 1200px) {
-  .indicators-card {
-    grid-column: span 2;
-  }
-}
-
-@media (max-width: 768px) {
-  .indicators-card {
-    grid-column: span 1;
-  }
-}
+/* Indicators (in profile dropdown only) */
 
 /* Login Page Styles */
 .login-container {
@@ -652,7 +709,7 @@ td {
 }
 
 .auth-tab.active {
-  background: linear-gradient(135deg, var(--accent-blue), #6366f1);
+  background: linear-gradient(135deg, #1e93e8, #34b4ff);
   border-color: transparent;
   color: white;
 }
@@ -759,12 +816,24 @@ td {
 
 /* User Profile Styles */
 .user-profile {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  position: relative;
   margin-left: 16px;
   padding-left: 16px;
   border-left: 1px solid var(--border-color);
+}
+
+.profile-trigger {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 10px;
+  transition: background 0.2s;
+}
+
+.profile-trigger:hover {
+  background: var(--glass);
 }
 
 .user-avatar {
@@ -781,6 +850,153 @@ td {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.profile-chevron {
+  font-size: 14px;
+  color: var(--text-secondary);
+  transition: transform 0.25s;
+}
+
+.profile-chevron.open {
+  transform: rotate(180deg);
+}
+
+/* Profile Dropdown */
+.profile-dropdown {
+  position: absolute;
+  top: calc(100% + 12px);
+  right: 0;
+  width: 540px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.03);
+  z-index: 100;
+  animation: dropdown-enter 0.2s ease-out;
+  overflow: hidden;
+}
+
+@keyframes dropdown-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.profile-section {
+  padding: 20px 24px;
+}
+
+.profile-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 14px;
+}
+
+.profile-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 0;
+}
+
+.profile-dropdown .config-grid {
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.profile-dropdown .config-item {
+  padding: 10px 12px;
+  font-size: 12px;
+}
+
+.profile-dropdown .config-item .label {
+  font-size: 11px;
+}
+
+.profile-dropdown .config-item .value {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.profile-indicators-scroll {
+  max-height: 280px;
+  overflow-y: auto;
+  margin: 0 -8px;
+  padding: 0 8px;
+}
+
+.profile-indicators-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+
+.profile-indicators-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.profile-indicators-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+.profile-indicators-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.profile-indicators-table th {
+  padding: 8px 10px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+  text-align: left;
+  position: sticky;
+  top: 0;
+  background: var(--bg-card);
+  z-index: 1;
+}
+
+.profile-indicators-table td {
+  padding: 8px 10px;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.profile-indicators-table .signal-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+}
+
+.profile-indicators-table .overall-signal {
+  font-size: 10px;
+  padding: 3px 8px;
+}
+
+.profile-logout {
+  display: block;
+  padding: 16px 24px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: all 0.2s;
+  text-align: center;
+}
+
+.profile-logout:hover {
+  background: rgba(255, 71, 87, 0.1);
+  color: var(--accent-red);
 }
 
 .btn-logout {
@@ -802,7 +1018,7 @@ td {
 
 /* Responsive adjustments for header */
 @media (max-width: 768px) {
-  .user-profile {
+  .user-name {
     display: none;
   }
 
@@ -812,37 +1028,130 @@ td {
 }
 
 /* ============================================================
+   DASHBOARD HERO HEADER
+   ============================================================ */
+
+.dash-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+
+.dash-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--accent-yellow);
+  margin-bottom: 8px;
+}
+
+.dash-title {
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1.15;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.dash-subtitle {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 480px;
+}
+
+.dash-status-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 20px 28px;
+  min-width: 260px;
+  flex-shrink: 0;
+}
+
+.dash-status-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.dash-status-value {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.dash-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent-red);
+}
+
+.dash-status-dot.active {
+  background: var(--accent-green);
+  box-shadow: 0 0 10px var(--accent-green);
+  animation: pulse 2s infinite;
+}
+
+.dash-status-detail {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* Card label (above h2) */
+.card-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--accent-yellow);
+  margin-bottom: 4px;
+}
+
+/* ============================================================
    NAVIGATION TABS
    ============================================================ */
 
 .nav-tabs {
   display: flex;
-  gap: 4px;
+  gap: 8px;
   margin-bottom: 28px;
   border-bottom: 1px solid var(--border-color);
+  padding-bottom: 6px;
 }
 
 .nav-tab {
-  padding: 12px 28px;
-  background: transparent;
-  border: none;
-  border-bottom: 3px solid transparent;
+  padding: 10px 22px;
+  background: rgba(255, 255, 255, 0.01);
+  border: 1px solid transparent;
+  border-radius: 999px;
   color: var(--text-secondary);
-  font-size: 15px;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s ease;
   font-family: inherit;
 }
 
 .nav-tab:hover {
-  color: var(--text-primary);
-  background: var(--glass);
+  color: #d8ebf8;
+  border-color: rgba(58, 169, 255, 0.25);
+  background: rgba(58, 169, 255, 0.08);
 }
 
 .nav-tab.active {
-  color: var(--text-primary);
-  border-bottom-color: var(--accent-blue);
+  color: #0a1822;
+  border-color: transparent;
+  background: linear-gradient(135deg, #8edaff, #66c5ff 60%, #ffd68a);
+  box-shadow: 0 8px 18px rgba(46, 162, 235, 0.26);
 }
 
 /* ============================================================
@@ -872,7 +1181,7 @@ td {
 }
 
 .oc-title {
-  font-size: 36px;
+  font-size: 26px;
   font-weight: 800;
   line-height: 1.15;
   color: var(--text-primary);
@@ -881,7 +1190,7 @@ td {
 
 .oc-subtitle {
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.5;
   max-width: 480px;
 }
@@ -890,10 +1199,11 @@ td {
 .oc-source-card {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 14px;
+  border-radius: 16px;
   padding: 20px 28px;
   min-width: 260px;
   flex-shrink: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .oc-source-label {
@@ -905,7 +1215,7 @@ td {
 }
 
 .oc-source-value {
-  font-size: 18px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text-primary);
   display: flex;
@@ -935,7 +1245,7 @@ td {
 .oc-form-card {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 16px;
+  border-radius: 18px;
   padding: 24px 28px;
   margin-bottom: 24px;
 }
@@ -963,7 +1273,7 @@ td {
 .oc-field input,
 .oc-field select {
   padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(240, 249, 255, 0.04);
   border: 1px solid var(--border-color);
   border-radius: 10px;
   color: var(--text-primary);
@@ -976,7 +1286,7 @@ td {
 .oc-field select:focus {
   outline: none;
   border-color: var(--accent-blue);
-  box-shadow: 0 0 0 3px rgba(77, 166, 255, 0.15);
+  box-shadow: 0 0 0 3px rgba(58, 169, 255, 0.18);
 }
 
 .oc-field select {
@@ -1059,12 +1369,13 @@ td {
 .oc-card {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 16px;
+  border-radius: 18px;
   padding: 24px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .oc-card h3 {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--text-primary);
   margin-bottom: 18px;
@@ -1259,6 +1570,77 @@ td {
   font-size: 14px;
 }
 
+/* LLM recommendation card */
+.oc-ai-card {
+  background: linear-gradient(160deg, rgba(24, 44, 58, 0.95), rgba(14, 31, 44, 0.95));
+  border: 1px solid rgba(80, 173, 230, 0.35);
+  border-radius: 18px;
+  padding: 18px 22px;
+  margin-bottom: 20px;
+  box-shadow: 0 14px 34px rgba(4, 11, 17, 0.32);
+}
+
+.oc-ai-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.oc-ai-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: #80d8ff;
+}
+
+.oc-ai-source {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.oc-ai-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.oc-ai-metric {
+  border: 1px solid rgba(99, 169, 210, 0.3);
+  background: rgba(235, 248, 255, 0.04);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.oc-ai-metric span {
+  display: block;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+.oc-ai-metric strong {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.oc-ai-empty {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px dashed rgba(255, 207, 91, 0.45);
+  color: #f7d982;
+  background: rgba(255, 207, 91, 0.08);
+  font-size: 13px;
+}
+
+.oc-ai-reasoning {
+  margin-top: 12px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #d3e4f2;
+}
+
 /* ============================================================
    OPTION CHAIN RESPONSIVE
    ============================================================ */
@@ -1284,6 +1666,10 @@ td {
     min-width: unset;
     width: 100%;
   }
+
+  .oc-ai-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 768px) {
@@ -1295,8 +1681,8 @@ td {
     grid-column: span 1;
   }
 
-  .oc-title {
-    font-size: 26px;
+  .oc-ai-grid {
+    grid-template-columns: 1fr;
   }
 
   .nav-tabs {
@@ -1307,4 +1693,144 @@ td {
     padding: 10px 20px;
     font-size: 14px;
   }
+}
+
+/* ============================================================
+   Collar Strategy Page
+   ============================================================ */
+.collar-strategy-page {
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.collar-form-row {
+  grid-template-columns: 1.2fr 1fr auto !important;
+}
+
+.collar-table-scroll {
+  max-height: 600px !important;
+}
+
+@media (max-width: 960px) {
+  .collar-form-row {
+    grid-template-columns: 1fr 1fr !important;
+  }
+  .collar-form-row .oc-btn-fetch {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 768px) {
+  .collar-form-row {
+    grid-template-columns: 1fr !important;
+  }
+  .collar-form-row .oc-btn-fetch {
+    grid-column: span 1;
+  }
+}
+
+/* ============================================================
+   Sortable Table Headers
+   ============================================================ */
+.sortable-th {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition: color 0.15s ease;
+}
+
+.sortable-th:hover {
+  color: #fff;
+}
+
+.sort-arrow {
+  display: inline-block;
+  margin-left: 4px;
+  width: 0;
+  height: 0;
+  vertical-align: middle;
+  opacity: 0.3;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  border-bottom: 4px solid currentColor;
+}
+
+.sort-arrow.asc {
+  opacity: 1;
+  border-bottom: 4px solid #ffd93d;
+  border-top: none;
+}
+
+.sort-arrow.desc {
+  opacity: 1;
+  border-top: 4px solid #ffd93d;
+  border-bottom: none;
+}
+
+/* ============================================================
+   Watchlist Add/Remove UI
+   ============================================================ */
+.watchlist-add-form {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.watchlist-add-form input {
+  flex: 1;
+  max-width: 140px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.watchlist-add-form input::placeholder {
+  color: var(--text-secondary);
+}
+
+.watchlist-add-form input:focus {
+  outline: none;
+  border-color: var(--accent-yellow);
+}
+
+.watchlist-add-form button {
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent-yellow);
+  color: #000;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.watchlist-add-form button:hover {
+  background: #e6c32f;
+}
+
+.btn-remove-watchlist {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: all 0.15s ease;
+}
+
+.btn-remove-watchlist:hover {
+  opacity: 1;
+  color: var(--accent-red);
+  background: rgba(255, 77, 77, 0.1);
 }

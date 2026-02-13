@@ -6,7 +6,7 @@ Includes trade/position persistence, DB fallback, and diagnostic logging.
 
 import logging
 import time
-import concurrent.futures
+import threading
 from datetime import timedelta
 from django.conf import settings
 from django.utils import timezone
@@ -15,6 +15,15 @@ from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 
 logger = logging.getLogger(__name__)
+
+# Small in-process cache to reduce yfinance rate-limit pressure.
+_INDICATORS_CACHE_TTL_SECONDS = 60
+_indicators_cache = {
+    'timestamp': 0.0,
+    'symbols': tuple(),
+    'results': [],
+}
+_indicators_cache_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -407,14 +416,32 @@ class PortfolioView(APIView):
                 logger.warning("PortfolioView: account data unavailable, falling back to DB")
                 return self._fallback_from_db(request)
 
-            daily_change = account['equity'] - account['last_equity']
+            # Get previous day's equity from DB snapshots for accurate daily change
+            from trading_api.models import PortfolioSnapshot
+            user = request.user if request.user.is_authenticated else None
+            today = timezone.now().date()
+
+            # Find the most recent snapshot from before today (previous trading day)
+            prev_snapshot = PortfolioSnapshot.objects.filter(
+                user=user,
+                timestamp__date__lt=today
+            ).order_by('-timestamp').first()
+
+            if prev_snapshot:
+                last_equity = float(prev_snapshot.equity)
+                logger.debug(f"Using previous snapshot equity: ${last_equity} from {prev_snapshot.timestamp}")
+            else:
+                # Fallback to broker's last_equity if no previous snapshot
+                last_equity = account['last_equity']
+                logger.debug(f"No previous snapshot, using broker last_equity: ${last_equity}")
+
+            daily_change = account['equity'] - last_equity
             daily_change_pct = (
-                (daily_change / account['last_equity'] * 100)
-                if account['last_equity'] > 0 else 0
+                (daily_change / last_equity * 100)
+                if last_equity > 0 else 0
             )
 
             # Persist snapshot (rate limited)
-            user = request.user if request.user.is_authenticated else None
             if should_save_snapshot(user):
                 save_portfolio_snapshot(account, positions, user=user)
 
@@ -570,66 +597,175 @@ class MarketView(APIView):
             elapsed = time.time() - start_time
             logger.debug(f"MarketView.get completed in {elapsed:.2f}s: is_open={is_open}")
 
-            return Response({
+            response = Response({
                 'is_open': is_open,
                 'next_open': hours.get('next_open') if hours else None,
                 'next_close': hours.get('next_close') if hours else None,
                 'broker_connected': True,
             })
+            # Prevent caching of market status
+            response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            response['Pragma'] = 'no-cache'
+            response['Expires'] = '0'
+            return response
         except Exception as e:
             elapsed = time.time() - start_time
             logger.warning(f"MarketView.get failed in {elapsed:.2f}s: {e}")
             from datetime import datetime
             from zoneinfo import ZoneInfo
             now = datetime.now(ZoneInfo('America/New_York'))
-            weekday = now.weekday()
-            hour = now.hour
-            is_market_hours = weekday < 5 and 9 <= hour < 16
-            return Response({
+
+            # Skip weekends
+            if now.weekday() >= 5:
+                is_market_hours = False
+            else:
+                # Proper market hours: 9:30 AM - 4:00 PM ET
+                market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
+                market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
+                is_market_hours = market_open <= now < market_close
+
+            response = Response({
                 'is_open': is_market_hours,
                 'next_open': None,
                 'next_close': None,
                 'broker_connected': False,
                 'error': str(e),
             })
+            # Prevent caching of market status
+            response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            response['Pragma'] = 'no-cache'
+            response['Expires'] = '0'
+            return response
 
 
 class WatchlistView(APIView):
-    """Get current prices for watchlist."""
+    """Manage user watchlist with add/delete functionality."""
 
     permission_classes = [IsAuthenticated]
+
+    def _get_watchlist_symbols(self, user):
+        """Get user's watchlist symbols or default if none exists."""
+        from trading_api.models import WatchlistItem
+        user_items = WatchlistItem.objects.filter(user=user)
+        if user_items.exists():
+            return list(user_items.values_list('symbol', flat=True)), True
+        return settings.TRADING_CONFIG['WATCHLIST'], False
 
     def get(self, request):
         start_time = time.time()
         logger.info("WatchlistView.get called")
         try:
-            data_aggregator = get_data_aggregator()
-            trading_config = settings.TRADING_CONFIG
-            watchlist_symbols = trading_config['WATCHLIST']
+            import yfinance as yf
 
-            prices = data_aggregator.market_client.get_current_prices(watchlist_symbols)
+            watchlist_symbols, is_custom = self._get_watchlist_symbols(request.user)
+
+            tickers = yf.Tickers(' '.join(watchlist_symbols))
             watchlist = []
             for symbol in watchlist_symbols:
-                watchlist.append({
-                    'symbol': symbol,
-                    'price': prices.get(symbol, 0)
-                })
+                try:
+                    ticker = tickers.tickers.get(symbol)
+                    info = ticker.info if ticker else {}
+                    price = info.get('regularMarketPrice') or info.get('currentPrice') or 0
+                    prev_close = info.get('regularMarketPreviousClose') or 0
+                    change = info.get('regularMarketChange') or (
+                        price - prev_close if prev_close else 0
+                    )
+                    change_pct = info.get('regularMarketChangePercent') or (
+                        (change / prev_close * 100) if prev_close > 0 else 0
+                    )
+                    watchlist.append({
+                        'symbol': symbol,
+                        'price': float(price),
+                        'change': round(float(change), 2),
+                        'change_pct': round(float(change_pct), 2),
+                        'prev_close': float(prev_close),
+                        'volume': int(info.get('regularMarketVolume') or 0),
+                        'market_cap': int(info.get('marketCap') or 0),
+                    })
+                except Exception as e:
+                    logger.debug(f"WatchlistView: error fetching {symbol}: {e}")
+                    watchlist.append({
+                        'symbol': symbol, 'price': 0, 'change': 0,
+                        'change_pct': 0, 'prev_close': 0, 'volume': 0,
+                        'market_cap': 0,
+                    })
 
             elapsed = time.time() - start_time
             logger.info(
                 f"WatchlistView.get completed in {elapsed:.2f}s: "
-                f"{len(watchlist)} symbols"
+                f"{len(watchlist)} symbols (custom={is_custom})"
             )
-            return Response({'watchlist': watchlist})
+            return Response({'watchlist': watchlist, 'is_custom': is_custom})
         except Exception as e:
             elapsed = time.time() - start_time
             logger.error(f"WatchlistView.get failed in {elapsed:.2f}s: {e}")
-            trading_config = settings.TRADING_CONFIG
-            watchlist_symbols = trading_config.get('WATCHLIST', [])
+            watchlist_symbols, _ = self._get_watchlist_symbols(request.user)
             return Response({
-                'watchlist': [{'symbol': s, 'price': 0} for s in watchlist_symbols],
+                'watchlist': [{
+                    'symbol': s, 'price': 0, 'change': 0, 'change_pct': 0,
+                    'prev_close': 0, 'volume': 0, 'market_cap': 0,
+                } for s in watchlist_symbols],
                 'error': str(e),
             })
+
+    def post(self, request):
+        """Add a symbol to user's watchlist."""
+        start_time = time.time()
+        from trading_api.models import WatchlistItem
+
+        symbol = request.data.get('symbol', '').upper().strip()
+        if not symbol:
+            return Response({'error': 'symbol is required'}, status=400)
+        if len(symbol) > 10 or not symbol.isalpha():
+            return Response({'error': 'Invalid symbol format'}, status=400)
+
+        # If user has no custom watchlist yet, seed with defaults first
+        if not WatchlistItem.objects.filter(user=request.user).exists():
+            for s in settings.TRADING_CONFIG['WATCHLIST']:
+                WatchlistItem.objects.get_or_create(user=request.user, symbol=s)
+            logger.info(f"WatchlistView.post: seeded default watchlist for {request.user.email}")
+
+        item, created = WatchlistItem.objects.get_or_create(
+            user=request.user, symbol=symbol
+        )
+
+        elapsed = time.time() - start_time
+        logger.info(
+            f"WatchlistView.post completed in {elapsed:.2f}s: "
+            f"{symbol} {'added' if created else 'already exists'}"
+        )
+
+        return Response({
+            'success': True,
+            'symbol': symbol,
+            'created': created,
+            'message': f'{symbol} added to watchlist' if created else f'{symbol} already in watchlist'
+        })
+
+    def delete(self, request):
+        """Remove a symbol from user's watchlist."""
+        start_time = time.time()
+        from trading_api.models import WatchlistItem
+
+        symbol = request.data.get('symbol', '').upper().strip()
+        if not symbol:
+            return Response({'error': 'symbol is required'}, status=400)
+
+        deleted, _ = WatchlistItem.objects.filter(
+            user=request.user, symbol=symbol
+        ).delete()
+
+        elapsed = time.time() - start_time
+        logger.info(
+            f"WatchlistView.delete completed in {elapsed:.2f}s: "
+            f"{symbol} {'removed' if deleted else 'not found'}"
+        )
+
+        return Response({
+            'success': deleted > 0,
+            'symbol': symbol,
+            'message': f'{symbol} removed from watchlist' if deleted else f'{symbol} not in watchlist'
+        })
 
 
 class TradesView(APIView):
@@ -641,6 +777,12 @@ class TradesView(APIView):
         start_time = time.time()
         logger.info("TradesView.get called")
 
+        # Get pagination params with defaults
+        page = int(request.query_params.get('page', 1))
+        limit = int(request.query_params.get('limit', 50))
+        limit = min(limit, 200)  # Cap at 200 max per request
+        offset = (page - 1) * limit
+
         user = request.user if request.user.is_authenticated else None
         broker_connected = False
         broker_trades = []
@@ -648,7 +790,7 @@ class TradesView(APIView):
         # Try to get live trades from broker
         try:
             trading_client = get_trading_client()
-            orders = trading_client.get_orders_history(limit=30)
+            orders = trading_client.get_orders_history(limit=100)  # Increased from 30
             broker_connected = True
 
             # Sync live trades to DB for persistence
@@ -684,11 +826,14 @@ class TradesView(APIView):
             if t['id'] not in broker_ids:
                 merged_trades.append(t)
 
-        # Sort by created_at descending, limit to 50
+        # Sort by created_at descending
         merged_trades.sort(
             key=lambda t: t.get('created_at') or '', reverse=True
         )
-        merged_trades = merged_trades[:50]
+
+        # Apply pagination
+        total_count = len(merged_trades)
+        paginated_trades = merged_trades[offset:offset + limit]
 
         source = 'ibkr_live' if broker_trades else ('database' if db_trades else 'none')
 
@@ -696,13 +841,17 @@ class TradesView(APIView):
         logger.info(
             f"TradesView.get completed in {elapsed:.2f}s: "
             f"{len(broker_trades)} from broker + {len(db_trades)} from DB "
-            f"= {len(merged_trades)} merged"
+            f"= {total_count} total, returning {len(paginated_trades)} (page {page})"
         )
 
         return Response({
-            'trades': merged_trades,
+            'trades': paginated_trades,
             'broker_connected': broker_connected,
             'source': source,
+            'total': total_count,
+            'page': page,
+            'limit': limit,
+            'has_more': offset + limit < total_count,
         })
 
     def _get_db_trades(self, user):
@@ -723,7 +872,7 @@ class TradesView(APIView):
 
         db_trades = Trade.objects.filter(
             trade_filter
-        ).order_by('-created_at')[:50]
+        ).order_by('-created_at')[:500]  # Increased from 50 to support pagination
 
         logger.debug(f"_get_db_trades: found {len(db_trades)} trades in DB (user={user})")
 
@@ -808,21 +957,67 @@ class IndicatorsView(APIView):
         start_time = time.time()
         logger.info("IndicatorsView.get called")
         try:
+            import math
+            import pandas as pd
             import yfinance as yf
             from trading_api.services import get_technical_indicators
             TechnicalIndicators = get_technical_indicators()
 
-            trading_config = settings.TRADING_CONFIG
-            top_symbols = trading_config['WATCHLIST'][:10]
+            top_symbols = tuple(settings.TRADING_CONFIG['WATCHLIST'][:10])
 
-            def get_indicator_for_symbol(symbol):
-                """Get indicator data for a single symbol."""
+            # Cache check
+            now = time.time()
+            with _indicators_cache_lock:
+                cache_hit = (
+                    _indicators_cache['results']
+                    and _indicators_cache['symbols'] == top_symbols
+                    and (now - _indicators_cache['timestamp']) < _INDICATORS_CACHE_TTL_SECONDS
+                )
+                if cache_hit:
+                    logger.info("IndicatorsView.get served from cache")
+                    return Response({'indicators': _indicators_cache['results']})
+
+            # Batch download for all symbols to avoid per-symbol rate limits
+            downloaded = yf.download(
+                tickers=' '.join(top_symbols),
+                period='3mo',
+                interval='1d',
+                group_by='ticker',
+                auto_adjust=False,
+                progress=False,
+                threads=False,
+            )
+
+            def _extract_symbol_df(symbol):
+                if downloaded is None or getattr(downloaded, 'empty', True):
+                    return None
+                if isinstance(downloaded.columns, pd.MultiIndex):
+                    if symbol not in downloaded.columns.get_level_values(0):
+                        return None
+                    df = downloaded[symbol].copy()
+                else:
+                    # Single-symbol download format
+                    if len(top_symbols) != 1 or symbol != top_symbols[0]:
+                        return None
+                    df = downloaded.copy()
+                df = df.dropna(how='all')
+                return df if not df.empty else None
+
+            def _safe_float(value):
                 try:
-                    ticker = yf.Ticker(symbol)
-                    df = ticker.history(period="3mo")
+                    f = float(value)
+                    if math.isnan(f) or math.isinf(f):
+                        return None
+                    return f
+                except (TypeError, ValueError):
+                    return None
 
-                    if df.empty or len(df) < 30:
-                        return {
+            results = []
+            for symbol in top_symbols:
+                try:
+                    df = _extract_symbol_df(symbol)
+                    if df is None or len(df) < 30:
+                        results.append({
                             'symbol': symbol,
                             'price': 0,
                             'rsi': None,
@@ -830,60 +1025,48 @@ class IndicatorsView(APIView):
                             'macd': None,
                             'macd_trend': 'NO DATA',
                             'overall_signal': 'NO DATA'
-                        }
+                        })
+                        continue
 
-                    tech = TechnicalIndicators(df)
-                    tech_data = tech.calculate_all()
+                    tech_data = TechnicalIndicators(df).calculate_all()
+                    close_series = df['Close'] if 'Close' in df.columns else df.iloc[:, 0]
+                    current_price = _safe_float(close_series.ffill().iloc[-1]) or 0
 
-                    current_price = float(df['Close'].iloc[-1]) if len(df) > 0 else 0
+                    rsi = _safe_float(tech_data.get('rsi'))
+                    macd = _safe_float(tech_data.get('macd'))
+                    macd_trend = str(tech_data.get('macd_signal') or 'NEUTRAL').upper()
 
-                    # Extract RSI
-                    rsi = tech_data.get('rsi')
-                    if rsi is not None and hasattr(rsi, 'iloc'):
-                        rsi = float(rsi.iloc[-1]) if len(rsi) > 0 and not rsi.empty else None
+                    if rsi is None:
+                        rsi_signal = 'NO DATA'
+                    elif rsi > 70:
+                        rsi_signal = 'OVERBOUGHT'
+                    elif rsi < 30:
+                        rsi_signal = 'OVERSOLD'
+                    elif rsi >= 60:
+                        rsi_signal = 'BULLISH'
+                    elif rsi <= 40:
+                        rsi_signal = 'BEARISH'
+                    else:
+                        rsi_signal = 'NEUTRAL'
 
-                    rsi_signal = 'NEUTRAL'
-                    if rsi is not None:
-                        if rsi > 70:
-                            rsi_signal = 'OVERBOUGHT'
-                        elif rsi < 30:
-                            rsi_signal = 'OVERSOLD'
-
-                    # Extract MACD
-                    macd = tech_data.get('macd')
-                    macd_sig = tech_data.get('macd_signal')
-                    if macd is not None and hasattr(macd, 'iloc'):
-                        macd = float(macd.iloc[-1]) if len(macd) > 0 and not macd.empty else None
-                    if macd_sig is not None and hasattr(macd_sig, 'iloc'):
-                        macd_sig = float(macd_sig.iloc[-1]) if len(macd_sig) > 0 else None
-
-                    macd_trend = 'NEUTRAL'
-                    if macd is not None and macd_sig is not None:
-                        if macd > macd_sig:
-                            macd_trend = 'BULLISH'
-                        else:
-                            macd_trend = 'BEARISH'
-
-                    # Overall signal
                     overall = 'NEUTRAL'
-                    if rsi_signal == 'OVERSOLD' or macd_trend == 'BULLISH':
+                    if rsi_signal in ('OVERSOLD', 'BULLISH') or macd_trend == 'BULLISH':
                         overall = 'BULLISH'
-                    elif rsi_signal == 'OVERBOUGHT' or macd_trend == 'BEARISH':
+                    elif rsi_signal in ('OVERBOUGHT', 'BEARISH') or macd_trend == 'BEARISH':
                         overall = 'BEARISH'
 
-                    return {
+                    results.append({
                         'symbol': symbol,
                         'price': round(current_price, 2),
-                        'rsi': round(rsi, 2) if rsi else None,
+                        'rsi': round(rsi, 2) if rsi is not None else None,
                         'rsi_signal': rsi_signal,
-                        'macd': round(macd, 4) if macd else None,
+                        'macd': round(macd, 4) if macd is not None else None,
                         'macd_trend': macd_trend,
                         'overall_signal': overall
-                    }
-
+                    })
                 except Exception as e:
                     logger.error(f"Indicator error for {symbol}: {e}")
-                    return {
+                    results.append({
                         'symbol': symbol,
                         'price': 0,
                         'rsi': None,
@@ -891,11 +1074,12 @@ class IndicatorsView(APIView):
                         'macd': None,
                         'macd_trend': 'ERROR',
                         'overall_signal': 'ERROR'
-                    }
+                    })
 
-            # Use thread pool for parallel fetching
-            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                results = list(executor.map(get_indicator_for_symbol, top_symbols))
+            with _indicators_cache_lock:
+                _indicators_cache['timestamp'] = time.time()
+                _indicators_cache['symbols'] = top_symbols
+                _indicators_cache['results'] = results
 
             elapsed = time.time() - start_time
             logger.info(
@@ -915,12 +1099,36 @@ class OptionChainView(APIView):
 
     permission_classes = [AllowAny]  # Public endpoint using free yfinance data
 
+    @staticmethod
+    def _extract_strike_row(df, strike):
+        """Return closest row for requested strike."""
+        if df is None or df.empty:
+            return None, None
+        strike_match = df[df['strike'] == strike]
+        if strike_match.empty:
+            closest_idx = (df['strike'] - strike).abs().idxmin()
+            strike_match = df.loc[[closest_idx]]
+        actual_strike = float(strike_match['strike'].iloc[0])
+        return actual_strike, strike_match.iloc[0]
+
+    @staticmethod
+    def _mid_price(row):
+        bid = float(row.get('bid', 0) or 0)
+        ask = float(row.get('ask', 0) or 0)
+        last = float(row.get('lastPrice', 0) or 0)
+        if bid > 0 and ask > 0:
+            return (bid + ask) / 2
+        return last
+
     def get(self, request):
         start_time = time.time()
 
         symbol = request.GET.get('symbol', '').upper()
         strike_str = request.GET.get('strike')
         option_type = request.GET.get('type', 'call').lower()
+        with_recommendation = str(
+            request.GET.get('with_recommendation', 'false')
+        ).lower() in ('1', 'true', 'yes')
 
         if not symbol:
             return Response({'error': 'symbol parameter is required'}, status=400)
@@ -973,22 +1181,17 @@ class OptionChainView(APIView):
 
             risk_free_rate = 0.045  # ~4.5 % US Treasury approximation
             options_data = []
+            sell_candidates = []
 
             for exp_date in expirations:
                 try:
                     chain = ticker.option_chain(exp_date)
-                    df = chain.calls if option_type == 'call' else chain.puts
+                    display_df = chain.calls if option_type == 'call' else chain.puts
 
                     # Find exact or closest strike
-                    strike_match = df[df['strike'] == strike]
-                    if strike_match.empty:
-                        if df.empty:
-                            continue
-                        closest_idx = (df['strike'] - strike).abs().idxmin()
-                        strike_match = df.loc[[closest_idx]]
-                    actual_strike = float(strike_match['strike'].iloc[0])
-
-                    row = strike_match.iloc[0]
+                    actual_strike, row = self._extract_strike_row(display_df, strike)
+                    if row is None:
+                        continue
                     last_price = float(row.get('lastPrice', 0) or 0)
                     bid = float(row.get('bid', 0) or 0)
                     ask = float(row.get('ask', 0) or 0)
@@ -1027,11 +1230,88 @@ class OptionChainView(APIView):
                         'theta': greeks.get('theta'),
                         'vega': greeks.get('vega'),
                     })
+
+                    # Build recommendation candidates for BOTH calls and puts.
+                    for sell_type, sell_df in (('CALL', chain.calls), ('PUT', chain.puts)):
+                        rec_strike, rec_row = self._extract_strike_row(sell_df, strike)
+                        if rec_row is None:
+                            continue
+                        premium = self._mid_price(rec_row)
+                        if premium <= 0:
+                            continue
+                        rec_bid = float(rec_row.get('bid', 0) or 0)
+                        rec_ask = float(rec_row.get('ask', 0) or 0)
+                        rec_volume = int(rec_row.get('volume', 0) or 0)
+                        rec_oi = int(rec_row.get('openInterest', 0) or 0)
+                        rec_iv = float(rec_row.get('impliedVolatility', 0) or 0)
+
+                        rec_greeks = {'delta': None, 'theta': None}
+                        if current_price and rec_iv > 0 and time_to_expiry > 0:
+                            rec_greeks = black_scholes_greeks(
+                                option_type=sell_type.lower(),
+                                stock_price=current_price,
+                                strike_price=rec_strike,
+                                time_to_expiry=time_to_expiry,
+                                risk_free_rate=risk_free_rate,
+                                implied_volatility=rec_iv,
+                            )
+
+                        sell_candidates.append({
+                            'option_type': sell_type,
+                            'expiration': exp_date,
+                            'days_to_expiry': days_to_expiry,
+                            'strike': rec_strike,
+                            'premium': round(float(premium), 4),
+                            'bid': rec_bid,
+                            'ask': rec_ask,
+                            'volume': rec_volume,
+                            'open_interest': rec_oi,
+                            'implied_volatility_pct': round(rec_iv * 100, 2),
+                            'delta': rec_greeks.get('delta'),
+                            'theta': rec_greeks.get('theta'),
+                        })
                 except Exception as e:
                     logger.warning(f"OptionChainView: error for {exp_date}: {e}")
                     continue
 
             options_data.sort(key=lambda x: x['expiration'])
+
+            recommendation = None
+            recommendation_error = None
+            if with_recommendation and current_price and sell_candidates:
+                try:
+                    from trading_api.services import get_llm_client
+                    LLMClient = get_llm_client()
+                    llm_client = LLMClient()
+                    recommendation = llm_client.recommend_option_to_sell(
+                        symbol=symbol,
+                        current_price=float(current_price),
+                        candidates=sell_candidates
+                    )
+
+                    # Attach liquidity fields from nearest matching candidate.
+                    if recommendation:
+                        same_type = [
+                            c for c in sell_candidates
+                            if c['option_type'] == recommendation.get('option_type')
+                        ]
+                        if same_type:
+                            nearest = min(
+                                same_type,
+                                key=lambda c: (
+                                    abs(c['strike'] - recommendation.get('strike', 0)),
+                                    abs(c['days_to_expiry'] - 30)
+                                )
+                            )
+                            recommendation.update({
+                                'open_interest': nearest.get('open_interest', 0),
+                                'volume': nearest.get('volume', 0),
+                                'days_to_expiry': nearest.get('days_to_expiry'),
+                                'implied_volatility_pct': nearest.get('implied_volatility_pct'),
+                            })
+                except Exception as e:
+                    recommendation_error = str(e)
+                    logger.warning(f"Option recommendation failed for {symbol}: {e}")
 
             elapsed = time.time() - start_time
             logger.info(
@@ -1046,12 +1326,196 @@ class OptionChainView(APIView):
                 'current_price': current_price,
                 'options': options_data,
                 'count': len(options_data),
+                'sell_recommendation': recommendation,
+                'recommendation_error': recommendation_error,
+                'recommendation_candidates': len(sell_candidates),
             })
 
         except Exception as e:
             elapsed = time.time() - start_time
             logger.error(f"OptionChainView.get failed in {elapsed:.2f}s: {e}", exc_info=True)
             return Response({'error': f'Failed to fetch option chain: {str(e)}'}, status=500)
+
+
+class CollarStrategyView(APIView):
+    """Calculate zero-cost collar strategies across all expirations."""
+
+    permission_classes = [AllowAny]  # Public endpoint using free yfinance data
+
+    def get(self, request):
+        start_time = time.time()
+
+        symbol = request.GET.get('symbol', '').upper()
+        upside_pct_str = request.GET.get('upside_pct', '5')
+
+        if not symbol:
+            return Response({'error': 'symbol parameter is required'}, status=400)
+
+        try:
+            upside_pct = float(upside_pct_str)
+        except ValueError:
+            return Response({'error': 'upside_pct must be a valid number'}, status=400)
+
+        if upside_pct <= 0 or upside_pct > 50:
+            return Response({'error': 'upside_pct must be between 0 and 50'}, status=400)
+
+        logger.info(f"CollarStrategyView.get: {symbol} upside={upside_pct}%")
+
+        try:
+            import yfinance as yf
+            from datetime import datetime as dt
+
+            ticker = yf.Ticker(symbol)
+
+            # Current stock price
+            current_price = None
+            try:
+                info = ticker.info
+                current_price = info.get('regularMarketPrice') or info.get('currentPrice')
+                if not current_price:
+                    hist = ticker.history(period='1d')
+                    current_price = float(hist['Close'].iloc[-1]) if len(hist) > 0 else None
+            except Exception as e:
+                logger.warning(f"CollarStrategyView: could not get price for {symbol}: {e}")
+
+            if not current_price:
+                return Response(
+                    {'error': f'Could not retrieve current price for {symbol}'},
+                    status=404,
+                )
+
+            # Target call strike
+            call_strike_target = current_price * (1 + upside_pct / 100)
+
+            # All expiration dates
+            try:
+                expirations = ticker.options
+            except Exception:
+                return Response(
+                    {'error': f'No options data available for {symbol}'},
+                    status=404,
+                )
+
+            if not expirations:
+                return Response(
+                    {'error': f'No option expirations found for {symbol}'},
+                    status=404,
+                )
+
+            logger.info(f"CollarStrategyView: {len(expirations)} expirations for {symbol}")
+
+            collars = []
+
+            for exp_date in expirations:
+                try:
+                    chain = ticker.option_chain(exp_date)
+                    calls_df = chain.calls
+                    puts_df = chain.puts
+
+                    if calls_df.empty or puts_df.empty:
+                        continue
+
+                    # Find call closest to target strike
+                    call_idx = (calls_df['strike'] - call_strike_target).abs().idxmin()
+                    call_row = calls_df.loc[call_idx]
+                    call_strike = float(call_row['strike'])
+
+                    # Use mid price for call premium (we SELL this)
+                    call_bid = float(call_row.get('bid', 0) or 0)
+                    call_ask = float(call_row.get('ask', 0) or 0)
+                    call_last = float(call_row.get('lastPrice', 0) or 0)
+                    call_premium = (call_bid + call_ask) / 2 if (call_bid > 0 and call_ask > 0) else call_last
+
+                    if call_premium <= 0:
+                        continue
+
+                    # Filter OTM puts (strike <= current_price)
+                    otm_puts = puts_df[puts_df['strike'] <= current_price].copy()
+                    if otm_puts.empty:
+                        continue
+
+                    # Compute mid price for each put
+                    otm_puts = otm_puts.copy()
+                    otm_puts.loc[:, 'put_bid'] = otm_puts['bid'].fillna(0).astype(float)
+                    otm_puts.loc[:, 'put_ask'] = otm_puts['ask'].fillna(0).astype(float)
+                    otm_puts.loc[:, 'put_last'] = otm_puts['lastPrice'].fillna(0).astype(float)
+                    otm_puts.loc[:, 'mid_price'] = otm_puts.apply(
+                        lambda r: (r['put_bid'] + r['put_ask']) / 2
+                        if r['put_bid'] > 0 and r['put_ask'] > 0
+                        else r['put_last'],
+                        axis=1
+                    )
+
+                    # Filter out zero-premium puts
+                    otm_puts = otm_puts[otm_puts['mid_price'] > 0]
+                    if otm_puts.empty:
+                        continue
+
+                    # Find put with premium closest to call premium (zero-cost match)
+                    otm_puts.loc[:, 'premium_diff'] = (otm_puts['mid_price'] - call_premium).abs()
+                    best_put_idx = otm_puts['premium_diff'].idxmin()
+                    put_row = otm_puts.loc[best_put_idx]
+
+                    put_strike = float(put_row['strike'])
+                    put_bid = float(put_row['put_bid'])
+                    put_ask = float(put_row['put_ask'])
+                    put_premium = float(put_row['mid_price'])
+
+                    # Calculations
+                    # Net cost: put premium (we pay) - call premium (we collect)
+                    # Negative = credit, Positive = debit
+                    net_cost = round(put_premium - call_premium, 4)
+                    max_profit = round(call_strike - current_price - net_cost, 2)
+                    max_loss = round(put_strike - current_price - net_cost, 2)
+                    protection_pct = round(((put_strike - current_price) / current_price) * 100, 2)
+                    upside_cap_pct = round(((call_strike - current_price) / current_price) * 100, 2)
+
+                    exp_datetime = dt.strptime(exp_date, '%Y-%m-%d')
+                    days_to_expiry = (exp_datetime - dt.now()).days
+
+                    collars.append({
+                        'expiration': exp_date,
+                        'days_to_expiry': days_to_expiry,
+                        'call_strike': call_strike,
+                        'call_premium': round(call_premium, 2),
+                        'call_bid': call_bid,
+                        'call_ask': call_ask,
+                        'put_strike': put_strike,
+                        'put_premium': round(put_premium, 2),
+                        'put_bid': put_bid,
+                        'put_ask': put_ask,
+                        'net_cost': round(net_cost, 2),
+                        'max_profit': max_profit,
+                        'max_loss': max_loss,
+                        'protection_pct': protection_pct,
+                        'upside_cap_pct': upside_cap_pct,
+                    })
+
+                except Exception as e:
+                    logger.warning(f"CollarStrategyView: error for {exp_date}: {e}")
+                    continue
+
+            collars.sort(key=lambda x: x['expiration'])
+
+            elapsed = time.time() - start_time
+            logger.info(
+                f"CollarStrategyView.get completed in {elapsed:.2f}s: "
+                f"{symbol} upside={upside_pct}%, {len(collars)} collars"
+            )
+
+            return Response({
+                'symbol': symbol,
+                'current_price': round(current_price, 2),
+                'upside_pct': upside_pct,
+                'call_strike_target': round(call_strike_target, 2),
+                'collars': collars,
+                'count': len(collars),
+            })
+
+        except Exception as e:
+            elapsed = time.time() - start_time
+            logger.error(f"CollarStrategyView.get failed in {elapsed:.2f}s: {e}", exc_info=True)
+            return Response({'error': f'Failed to calculate collar strategy: {str(e)}'}, status=500)
 
 
 class TestTradeView(APIView):
