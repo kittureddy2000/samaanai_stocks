@@ -93,7 +93,7 @@ jobs:
             --add-cloudsql-instances=${{ env.GCP_PROJECT }}:${{ env.GCP_REGION }}:${{ env.CLOUDSQL_INSTANCE }}
             --vpc-connector=trading-vpc-connector
             --vpc-egress=private-ranges-only
-            --set-secrets=DJANGO_SECRET_KEY=TRADING_SECRET_KEY:latest,DB_PASSWORD=TRADING_DB_PASSWORD:latest,SMTP_USER=TRADING_SMTP_USER:latest,SMTP_PASSWORD=TRADING_SMTP_PASSWORD:latest,SLACK_WEBHOOK_URL=TRADING_SLACK_WEBHOOK:latest,NEWS_API_KEY=TRADING_NEWS_API_KEY:latest
+            --set-secrets=DJANGO_SECRET_KEY=TRADING_SECRET_KEY:latest,DB_PASSWORD=TRADING_DB_PASSWORD:latest,SMTP_USER=TRADING_SMTP_USER:latest,SMTP_PASSWORD=TRADING_SMTP_PASSWORD:latest,SLACK_WEBHOOK_URL=TRADING_SLACK_WEBHOOK:latest,NEWS_API_KEY=TRADING_NEWS_API_KEY:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest
           env_vars: |
             DJANGO_SETTINGS_MODULE=backend.settings.production
             BROKER_TYPE=ibkr
@@ -107,7 +107,6 @@ jobs:
             AUTHORIZED_EMAILS=${{ vars.AUTHORIZED_EMAILS_PROD }}
             EMAIL_RECIPIENTS=${{ vars.EMAIL_RECIPIENTS_PROD }}
             EMAIL_FROM=trading@samaanai.com
-            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
             GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID_PROD }}
             GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET_PROD }}
 

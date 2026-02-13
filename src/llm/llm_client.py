@@ -41,6 +41,7 @@ class LLMClient:
         self.client = genai.Client(api_key=config.gemini.api_key)
         self.model = config.gemini.model
         self.temperature = config.gemini.temperature
+        self.last_error: Optional[str] = None
     
     def analyze_market(
         self, 
@@ -66,6 +67,7 @@ class LLMClient:
         last_error = None
         for attempt in range(max_retries):
             try:
+                self.last_error = None
                 if attempt > 0:
                     # Exponential backoff: 5s, 15s, 45s
                     wait_time = 5 * (3 ** attempt)
@@ -97,7 +99,7 @@ class LLMClient:
                     logger.info(f"LLM analysis complete: {len(parsed.trades)} trade(s) recommended")
                     for trade in parsed.trades:
                         logger.info(f"  → {trade.action} {trade.quantity} {trade.symbol} (confidence: {trade.confidence:.0%})")
-                
+
                 return parsed
                 
             except json.JSONDecodeError as e:
@@ -106,6 +108,7 @@ class LLMClient:
                 
             except Exception as e:
                 last_error = e
+                self.last_error = str(e)
                 error_str = str(e)
                 
                 # Check if it's a retryable error (503, 429, rate limit)
@@ -120,6 +123,7 @@ class LLMClient:
                         return None  # Don't retry non-retryable errors
         
         logger.error(f"All {max_retries} retry attempts failed. Last error: {last_error}")
+        self.last_error = str(last_error) if last_error else "Unknown LLM error"
         return None
     
     def _parse_response(self, data: Dict[str, Any]) -> Optional[LLMResponse]:
@@ -234,6 +238,7 @@ class LLMClient:
         last_error = None
         for attempt in range(max_retries):
             try:
+                self.last_error = None
                 if attempt > 0:
                     wait_time = 4 * (2 ** attempt)
                     logger.info(
@@ -267,7 +272,9 @@ class LLMClient:
                 return recommendation
             except Exception as e:
                 last_error = e
+                self.last_error = str(e)
                 logger.warning(f"Option recommendation failed on attempt {attempt + 1}: {e}")
 
         logger.error(f"Option recommendation failed after retries: {last_error}")
+        self.last_error = str(last_error) if last_error else "Unknown option recommendation error"
         return None

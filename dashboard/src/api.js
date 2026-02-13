@@ -67,7 +67,8 @@ export const login = async (email, password) => {
     return response.data;
 };
 
-export const getLoginUrl = () => `${API_BASE}/auth/google`;
+// Use allauth endpoint directly (works even if /auth/google redirect route is unavailable).
+export const getLoginUrl = () => `${API_BASE}/accounts/google/login/`;
 export const getLogoutUrl = () => `${API_BASE}/auth/logout`;
 export const logout = async () => {
     try {

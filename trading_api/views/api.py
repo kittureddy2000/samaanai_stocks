@@ -1120,6 +1120,77 @@ class OptionChainView(APIView):
             return (bid + ask) / 2
         return last
 
+    @staticmethod
+    def _attach_nearest_candidate(recommendation, candidates):
+        """Attach liquidity and timing fields using nearest candidate contract."""
+        same_type = [
+            c for c in candidates
+            if c['option_type'] == recommendation.get('option_type')
+        ]
+        if not same_type:
+            return recommendation
+        nearest = min(
+            same_type,
+            key=lambda c: (
+                abs(c['strike'] - recommendation.get('strike', 0)),
+                abs(c['days_to_expiry'] - 30)
+            )
+        )
+        recommendation.update({
+            'open_interest': nearest.get('open_interest', 0),
+            'volume': nearest.get('volume', 0),
+            'days_to_expiry': nearest.get('days_to_expiry'),
+            'implied_volatility_pct': nearest.get('implied_volatility_pct'),
+        })
+        return recommendation
+
+    @staticmethod
+    def _heuristic_sell_recommendation(symbol, current_price, candidates):
+        """Fallback recommendation when LLM is unavailable.
+
+        Prefers liquid contracts with reasonable DTE and moderate delta.
+        """
+        if not candidates:
+            return None
+
+        def _score(c):
+            days = c.get('days_to_expiry', 0)
+            oi = float(c.get('open_interest', 0) or 0)
+            vol = float(c.get('volume', 0) or 0)
+            premium = float(c.get('premium', 0) or 0)
+            delta = c.get('delta')
+
+            liquidity_score = min(oi / 2500.0, 1.0) * 0.35 + min(vol / 1200.0, 1.0) * 0.25
+            premium_score = min(premium / 5.0, 1.0) * 0.20
+            dte_score = max(0.0, 1.0 - (abs(days - 30) / 30.0)) * 0.10
+
+            delta_score = 0.05
+            if delta is not None:
+                target = 0.25 if c.get('option_type') == 'CALL' else -0.25
+                delta_score = max(0.0, 1.0 - abs(float(delta) - target) / 0.4) * 0.10
+
+            return liquidity_score + premium_score + dte_score + delta_score
+
+        ranked = sorted(candidates, key=_score, reverse=True)
+        best = ranked[0]
+        best_score = _score(best)
+
+        recommendation = {
+            'option_type': best.get('option_type'),
+            'expiration': best.get('expiration'),
+            'strike': float(best.get('strike') or 0),
+            'premium': float(best.get('premium') or 0),
+            'confidence': round(min(0.50 + (best_score * 0.4), 0.88), 2),
+            'reasoning': (
+                f"Heuristic fallback for {symbol}: selected {best.get('option_type')} "
+                f"{best.get('strike')} {best.get('expiration')} based on liquidity "
+                f"(OI {int(best.get('open_interest') or 0)}, Vol {int(best.get('volume') or 0)}), "
+                f"premium ${float(best.get('premium') or 0):.2f}, and DTE {best.get('days_to_expiry')}."
+            ),
+            'generated_by': 'heuristic'
+        }
+        return recommendation
+
     def get(self, request):
         start_time = time.time()
 
@@ -1288,30 +1359,31 @@ class OptionChainView(APIView):
                         current_price=float(current_price),
                         candidates=sell_candidates
                     )
-
-                    # Attach liquidity fields from nearest matching candidate.
                     if recommendation:
-                        same_type = [
-                            c for c in sell_candidates
-                            if c['option_type'] == recommendation.get('option_type')
-                        ]
-                        if same_type:
-                            nearest = min(
-                                same_type,
-                                key=lambda c: (
-                                    abs(c['strike'] - recommendation.get('strike', 0)),
-                                    abs(c['days_to_expiry'] - 30)
-                                )
-                            )
-                            recommendation.update({
-                                'open_interest': nearest.get('open_interest', 0),
-                                'volume': nearest.get('volume', 0),
-                                'days_to_expiry': nearest.get('days_to_expiry'),
-                                'implied_volatility_pct': nearest.get('implied_volatility_pct'),
-                            })
+                        recommendation = self._attach_nearest_candidate(
+                            recommendation, sell_candidates
+                        )
+                    else:
+                        recommendation_error = (
+                            getattr(llm_client, 'last_error', None)
+                            or 'LLM returned no recommendation'
+                        )
                 except Exception as e:
                     recommendation_error = str(e)
                     logger.warning(f"Option recommendation failed for {symbol}: {e}")
+
+                # Always provide a recommendation object for UI continuity.
+                if recommendation is None:
+                    recommendation = self._heuristic_sell_recommendation(
+                        symbol=symbol,
+                        current_price=float(current_price),
+                        candidates=sell_candidates
+                    )
+                    if recommendation and recommendation_error:
+                        recommendation['reasoning'] = (
+                            recommendation['reasoning'] +
+                            f" LLM unavailable: {recommendation_error}"
+                        )
 
             elapsed = time.time() - start_time
             logger.info(
