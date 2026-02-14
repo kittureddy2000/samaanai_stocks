@@ -1472,6 +1472,10 @@ td {
   gap: 20px;
 }
 
+.oc-grid-vertical {
+  grid-template-columns: 1fr;
+}
+
 /* Cards */
 .oc-card {
   background: var(--bg-card);

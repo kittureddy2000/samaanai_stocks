@@ -186,6 +186,8 @@ function OptionChainPage() {
     iv: opt.implied_volatility,
     price: opt.last_price,
     days: opt.days_to_expiry,
+    premiumPct: opt.premium_pct,
+    annualizedPct: opt.annualized_pct,
   })) || [];
   const recommendation = data?.sell_recommendation;
 
@@ -203,6 +205,14 @@ function OptionChainPage() {
         <div className="chart-tooltip-row">
           <span className="chart-tooltip-dot" style={{ background: '#4da6ff' }}></span>
           Price: ${d?.price?.toFixed(2)}
+        </div>
+        <div className="chart-tooltip-row">
+          <span className="chart-tooltip-dot" style={{ background: '#90e6ff' }}></span>
+          Premium %: {d?.premiumPct != null ? `${Number(d.premiumPct).toFixed(2)}%` : '--'}
+        </div>
+        <div className="chart-tooltip-row">
+          <span className="chart-tooltip-dot" style={{ background: '#9df6da' }}></span>
+          Annualized %: {d?.annualizedPct != null ? `${Number(d.annualizedPct).toFixed(2)}%` : '--'}
         </div>
         <div className="chart-tooltip-row dim">{d?.days} days to expiry</div>
       </div>
@@ -361,7 +371,7 @@ function OptionChainPage() {
             )}
           </div>
 
-          <div className="oc-grid">
+          <div className="oc-grid oc-grid-vertical">
             {/* IV + Price Trend Chart */}
             <div className="oc-card">
               <h3>IV + Price Trend</h3>
