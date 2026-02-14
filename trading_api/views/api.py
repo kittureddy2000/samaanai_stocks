@@ -1325,20 +1325,44 @@ class OptionChainView(APIView):
 
     @staticmethod
     def _attach_nearest_candidate(recommendation, candidates):
-        """Attach liquidity and timing fields using nearest candidate contract."""
+        """Attach liquidity/timing fields using best matching candidate contract.
+
+        Ensures expiration and DTE stay consistent in UI by preferring
+        exact expiration matches when present.
+        """
         same_type = [
             c for c in candidates
             if c['option_type'] == recommendation.get('option_type')
         ]
         if not same_type:
             return recommendation
+
+        rec_exp = str(recommendation.get('expiration') or '').strip()
+        rec_strike = float(recommendation.get('strike', 0) or 0)
+        rec_days = recommendation.get('days_to_expiry')
+        if rec_days is None:
+            rec_days = 30
+        else:
+            rec_days = int(rec_days)
+
         nearest = min(
             same_type,
             key=lambda c: (
-                abs(c['strike'] - recommendation.get('strike', 0)),
-                abs(c['days_to_expiry'] - 30)
+                0 if (rec_exp and c.get('expiration') == rec_exp) else 1,
+                abs(float(c.get('strike') or 0) - rec_strike),
+                abs(int(c.get('days_to_expiry') or 0) - rec_days),
             )
         )
+
+        # If no exact-expiration candidate was found, sync recommendation
+        # identity to the attached contract to avoid expiration/DTE mismatch.
+        if rec_exp and nearest.get('expiration') != rec_exp:
+            recommendation.update({
+                'expiration': nearest.get('expiration'),
+                'strike': nearest.get('strike'),
+                'premium': nearest.get('premium', recommendation.get('premium')),
+            })
+
         recommendation.update({
             'open_interest': nearest.get('open_interest', 0),
             'volume': nearest.get('volume', 0),
