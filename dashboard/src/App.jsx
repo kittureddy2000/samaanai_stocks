@@ -738,6 +738,7 @@ function App() {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [loading, setLoading] = useState(true);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [profileSubmenu, setProfileSubmenu] = useState(null);
   const [newWatchlistSymbol, setNewWatchlistSymbol] = useState('');
   const [watchlistError, setWatchlistError] = useState('');
   const [watchlistLoading, setWatchlistLoading] = useState(false);
@@ -805,6 +806,7 @@ function App() {
     const handleClickOutside = (e) => {
       if (profileRef.current && !profileRef.current.contains(e.target)) {
         setProfileOpen(false);
+        setProfileSubmenu(null);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -836,6 +838,12 @@ function App() {
     setUser(null);
     setAuthChecked(true);
     setCurrentPage('dashboard');
+    setProfileOpen(false);
+    setProfileSubmenu(null);
+  }, []);
+
+  const toggleProfileSubmenu = useCallback((menuKey) => {
+    setProfileSubmenu((prev) => (prev === menuKey ? null : menuKey));
   }, []);
 
   const fetchData = useCallback(async () => {
@@ -939,13 +947,15 @@ function App() {
 
   const dailyChange = portfolio?.performance?.daily_change || 0;
   const dailyChangePct = portfolio?.performance?.daily_change_pct || 0;
-  const totalUnrealizedPL = (portfolio?.positions || []).reduce(
+  const positionUnrealizedPL = (portfolio?.positions || []).reduce(
     (sum, pos) => sum + (pos.unrealized_pl || 0), 0
   );
-  const totalCostBasis = (portfolio?.positions || []).reduce(
+  const positionCostBasis = (portfolio?.positions || []).reduce(
     (sum, pos) => sum + ((pos.avg_entry_price || 0) * (pos.qty || 0)), 0
   );
-  const totalPLPercent = totalCostBasis > 0 ? (totalUnrealizedPL / totalCostBasis) * 100 : 0;
+  const fallbackOverallPct = positionCostBasis > 0 ? (positionUnrealizedPL / positionCostBasis) * 100 : 0;
+  const overallChange = portfolio?.performance?.overall_change ?? positionUnrealizedPL;
+  const overallChangePct = portfolio?.performance?.overall_change_pct ?? fallbackOverallPct;
   const visibleIndicators = indicators.filter((ind) => ind?.overall_signal !== 'ERROR');
   const indicatorFeedDown = indicators.length > 0 && visibleIndicators.length === 0;
   const lastAgentRun = agentStatus?.last_run;
@@ -979,69 +989,102 @@ function App() {
           <span className="last-updated">Last updated: {lastUpdated || '--:--'}</span>
           <button className="btn-refresh" onClick={fetchData}>&#x1F504; Refresh</button>
           <div className="user-profile" ref={profileRef}>
-            <div className="profile-trigger" onClick={() => setProfileOpen(!profileOpen)}>
+            <div className="profile-trigger" onClick={() => {
+              setProfileOpen((prev) => {
+                const next = !prev;
+                if (!next) setProfileSubmenu(null);
+                return next;
+              });
+            }}>
               {user.picture && <img src={user.picture} alt="profile" className="user-avatar" />}
               <span className="user-name">{user.name || user.email}</span>
               <span className={`profile-chevron ${profileOpen ? 'open' : ''}`}>&#x25BE;</span>
             </div>
             {profileOpen && (
               <div className="profile-dropdown">
-                {/* Agent Configuration */}
-                <div className="profile-section">
-                  <div className="profile-section-title">Agent Configuration</div>
-                  <div className="config-grid">
-                    <div className="config-item"><span className="label">Analysis Interval</span><span className="value">{config?.analysis_interval || 30} min</span></div>
-                    <div className="config-item"><span className="label">Max Position %</span><span className="value">{config?.max_position_pct || 10}%</span></div>
-                    <div className="config-item"><span className="label">Max Daily Loss</span><span className="value">{config?.max_daily_loss_pct || 3}%</span></div>
-                    <div className="config-item"><span className="label">Min Confidence</span><span className="value">{config?.min_confidence || 70}%</span></div>
-                    <div className="config-item"><span className="label">Stop Loss</span><span className="value">{config?.stop_loss_pct || 5}%</span></div>
-                    <div className="config-item"><span className="label">Take Profit</span><span className="value">{config?.take_profit_pct || 10}%</span></div>
-                  </div>
+                <div className="profile-menu">
+                  <button
+                    className={`profile-submenu-trigger ${profileSubmenu === 'agent' ? 'open' : ''}`}
+                    onClick={() => toggleProfileSubmenu('agent')}
+                  >
+                    <span>Agent Configuration</span>
+                    <span className="submenu-chevron">&#x25BE;</span>
+                  </button>
+                  {profileSubmenu === 'agent' && (
+                    <div className="profile-submenu-content">
+                      <div className="config-grid">
+                        <div className="config-item"><span className="label">Analysis Interval</span><span className="value">{config?.analysis_interval || 30} min</span></div>
+                        <div className="config-item"><span className="label">Max Position %</span><span className="value">{config?.max_position_pct || 10}%</span></div>
+                        <div className="config-item"><span className="label">Max Daily Loss</span><span className="value">{config?.max_daily_loss_pct || 3}%</span></div>
+                        <div className="config-item"><span className="label">Min Confidence</span><span className="value">{config?.min_confidence || 70}%</span></div>
+                        <div className="config-item"><span className="label">Stop Loss</span><span className="value">{config?.stop_loss_pct || 5}%</span></div>
+                        <div className="config-item"><span className="label">Take Profit</span><span className="value">{config?.take_profit_pct || 10}%</span></div>
+                        <div className="config-item"><span className="label">Initial Capital</span><span className="value">{formatCurrency(config?.initial_capital || 1000000)}</span></div>
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    className={`profile-submenu-trigger ${profileSubmenu === 'indicators' ? 'open' : ''}`}
+                    onClick={() => toggleProfileSubmenu('indicators')}
+                  >
+                    <span>Technical Indicators</span>
+                    <span className="submenu-chevron">&#x25BE;</span>
+                  </button>
+                  {profileSubmenu === 'indicators' && (
+                    <div className="profile-submenu-content">
+                      <div className="profile-indicators-scroll">
+                        <table className="profile-indicators-table">
+                          <thead>
+                            <tr><th>Symbol</th><th>Price</th><th>RSI</th><th>MACD</th><th>Signal</th></tr>
+                          </thead>
+                          <tbody>
+                            {indicators.length === 0 ? (
+                              <tr><td colSpan="5" className="empty-state">Loading indicators...</td></tr>
+                            ) : indicatorFeedDown ? (
+                              <tr><td colSpan="5" className="empty-state">Indicator data temporarily unavailable</td></tr>
+                            ) : (
+                              visibleIndicators.map((ind) => (
+                                <tr key={ind.symbol}>
+                                  <td className="symbol-highlight">{ind.symbol}</td>
+                                  <td>{ind.price ? formatCurrency(ind.price) : '--'}</td>
+                                  <td>
+                                    <span className={getSignalClass(ind.rsi_signal)}>{ind.rsi ? ind.rsi.toFixed(1) : '--'}</span>
+                                    <span className="signal-badge">{ind.rsi_signal || ''}</span>
+                                  </td>
+                                  <td>
+                                    <span className={getSignalClass(ind.macd_trend)}>{ind.macd ? ind.macd.toFixed(2) : '--'}</span>
+                                    <span className="signal-badge">{ind.macd_trend || ''}</span>
+                                  </td>
+                                  <td>
+                                    <span className={`overall-signal ${getSignalClass(ind.overall_signal)}`}>
+                                      {ind.overall_signal || 'NEUTRAL'}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    className={`profile-submenu-trigger profile-submenu-signout ${profileSubmenu === 'logout' ? 'open' : ''}`}
+                    onClick={() => toggleProfileSubmenu('logout')}
+                  >
+                    <span>Sign Out</span>
+                    <span className="submenu-chevron">&#x25BE;</span>
+                  </button>
+                  {profileSubmenu === 'logout' && (
+                    <div className="profile-submenu-content">
+                      <button onClick={handleLogout} className="profile-logout">
+                        Confirm Sign Out
+                      </button>
+                    </div>
+                  )}
                 </div>
-                <div className="profile-divider"></div>
-                {/* Technical Indicators */}
-                <div className="profile-section">
-                  <div className="profile-section-title">Technical Indicators</div>
-                  <div className="profile-indicators-scroll">
-                    <table className="profile-indicators-table">
-                      <thead>
-                        <tr><th>Symbol</th><th>Price</th><th>RSI</th><th>MACD</th><th>Signal</th></tr>
-                      </thead>
-                      <tbody>
-                        {indicators.length === 0 ? (
-                          <tr><td colSpan="5" className="empty-state">Loading indicators...</td></tr>
-                        ) : indicatorFeedDown ? (
-                          <tr><td colSpan="5" className="empty-state">Indicator data temporarily unavailable</td></tr>
-                        ) : (
-                          visibleIndicators.map((ind) => (
-                            <tr key={ind.symbol}>
-                              <td className="symbol-highlight">{ind.symbol}</td>
-                              <td>{ind.price ? formatCurrency(ind.price) : '--'}</td>
-                              <td>
-                                <span className={getSignalClass(ind.rsi_signal)}>{ind.rsi ? ind.rsi.toFixed(1) : '--'}</span>
-                                <span className="signal-badge">{ind.rsi_signal || ''}</span>
-                              </td>
-                              <td>
-                                <span className={getSignalClass(ind.macd_trend)}>{ind.macd ? ind.macd.toFixed(2) : '--'}</span>
-                                <span className="signal-badge">{ind.macd_trend || ''}</span>
-                              </td>
-                              <td>
-                                <span className={`overall-signal ${getSignalClass(ind.overall_signal)}`}>
-                                  {ind.overall_signal || 'NEUTRAL'}
-                                </span>
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-                <div className="profile-divider"></div>
-                {/* Logout */}
-                <button onClick={handleLogout} className="profile-logout">
-                  Sign Out
-                </button>
               </div>
             )}
           </div>
@@ -1124,8 +1167,8 @@ function App() {
                 </div>
                 <div className="stat">
                   <span className="label">Overall P&L</span>
-                  <span className={`value ${totalUnrealizedPL >= 0 ? 'positive' : 'negative'}`}>
-                    {formatCurrency(totalUnrealizedPL)} ({formatPercent(totalPLPercent)})
+                  <span className={`value ${overallChange >= 0 ? 'positive' : 'negative'}`}>
+                    {formatCurrency(overallChange)} ({formatPercent(overallChangePct)})
                   </span>
                 </div>
                 <div className="stat">

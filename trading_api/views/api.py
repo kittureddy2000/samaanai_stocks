@@ -488,6 +488,13 @@ class PortfolioView(APIView):
                 (daily_change / last_equity * 100)
                 if last_equity > 0 else 0
             )
+            initial_capital = float(settings.TRADING_CONFIG.get('INITIAL_CAPITAL', 1_000_000))
+            portfolio_value = float(account['portfolio_value'])
+            overall_change = portfolio_value - initial_capital
+            overall_change_pct = (
+                (overall_change / initial_capital * 100)
+                if initial_capital > 0 else 0
+            )
 
             # Persist snapshot (rate limited)
             if should_save_snapshot(user):
@@ -506,10 +513,13 @@ class PortfolioView(APIView):
                     'portfolio_value': account['portfolio_value'],
                     'equity': account['equity'],
                     'buying_power': account['buying_power'],
+                    'initial_capital': initial_capital,
                 },
                 'performance': {
                     'daily_change': daily_change,
                     'daily_change_pct': daily_change_pct,
+                    'overall_change': overall_change,
+                    'overall_change_pct': overall_change_pct,
                 },
                 'positions': positions,
                 'positions_count': len(positions),
@@ -561,16 +571,27 @@ class PortfolioView(APIView):
             f"snapshot={snapshot.timestamp.isoformat()}, {len(positions)} positions"
         )
 
+        initial_capital = float(settings.TRADING_CONFIG.get('INITIAL_CAPITAL', 1_000_000))
+        portfolio_value = float(snapshot.portfolio_value)
+        overall_change = portfolio_value - initial_capital
+        overall_change_pct = (
+            (overall_change / initial_capital * 100)
+            if initial_capital > 0 else 0
+        )
+
         return Response({
             'account': {
                 'cash': float(snapshot.cash),
                 'portfolio_value': float(snapshot.portfolio_value),
                 'equity': float(snapshot.equity),
                 'buying_power': 0,
+                'initial_capital': initial_capital,
             },
             'performance': {
                 'daily_change': float(snapshot.daily_change or 0),
                 'daily_change_pct': float(snapshot.daily_change_pct or 0),
+                'overall_change': overall_change,
+                'overall_change_pct': overall_change_pct,
             },
             'positions': positions,
             'positions_count': len(positions),
@@ -1098,6 +1119,7 @@ class ConfigView(APIView):
             'min_confidence': trading_config['MIN_CONFIDENCE'] * 100,
             'stop_loss_pct': trading_config['STOP_LOSS_PCT'] * 100,
             'take_profit_pct': trading_config['TAKE_PROFIT_PCT'] * 100,
+            'initial_capital': trading_config.get('INITIAL_CAPITAL', 1000000),
         })
 
 
