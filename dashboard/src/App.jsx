@@ -971,6 +971,8 @@ function App() {
   const lastTradeRunText = lastTradeRun?.created_at
     ? new Date(lastTradeRun.created_at).toLocaleString()
     : 'No recent executions';
+  const ibkrConnected = config?.broker === 'ibkr' && config?.ibkr_connection_test === 'success';
+  const ibkrStatusText = ibkrConnected ? 'IBKR Connected' : 'IBKR Connection Issue';
 
   return (
     <div className="dashboard">
@@ -983,6 +985,10 @@ function App() {
             <span className="status-text">
               {market?.is_open ? 'Market Open' : 'Market Closed'}
             </span>
+          </div>
+          <div className={`ibkr-badge ${ibkrConnected ? 'connected' : 'disconnected'}`}>
+            <span className="ibkr-icon">&#x1F3E6;</span>
+            <span>{ibkrStatusText}</span>
           </div>
         </div>
         <div className="header-right">
@@ -1020,6 +1026,50 @@ function App() {
                         <div className="config-item"><span className="label">Stop Loss</span><span className="value">{config?.stop_loss_pct || 5}%</span></div>
                         <div className="config-item"><span className="label">Take Profit</span><span className="value">{config?.take_profit_pct || 10}%</span></div>
                         <div className="config-item"><span className="label">Initial Capital</span><span className="value">{formatCurrency(config?.initial_capital || 1000000)}</span></div>
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    className={`profile-submenu-trigger ${profileSubmenu === 'broker' ? 'open' : ''}`}
+                    onClick={() => toggleProfileSubmenu('broker')}
+                  >
+                    <span>Broker Status</span>
+                    <span className="submenu-chevron">&#x25BE;</span>
+                  </button>
+                  {profileSubmenu === 'broker' && (
+                    <div className="profile-submenu-content">
+                      <div className="profile-broker-panel">
+                        <div className="profile-broker-row">
+                          <span>Broker</span>
+                          <strong>Interactive Brokers (IBKR)</strong>
+                        </div>
+                        <div className="profile-broker-row">
+                          <span>Connection</span>
+                          <strong className={ibkrConnected ? 'positive' : 'negative'}>{ibkrStatusText}</strong>
+                        </div>
+                        <div className="profile-broker-row">
+                          <span>Market</span>
+                          <strong>{market?.is_open ? 'Open' : 'Closed'}</strong>
+                        </div>
+                        <div className="profile-broker-row">
+                          <span>Positions / Value</span>
+                          <strong>{portfolio?.positions?.length || 0} / {formatCurrency(portfolio?.account?.portfolio_value || 0)}</strong>
+                        </div>
+                        <div className="profile-broker-row">
+                          <span>Agent runs (24h)</span>
+                          <strong>{runsLast24h}</strong>
+                        </div>
+                        <div className="profile-broker-row">
+                          <span>Trades executed (24h)</span>
+                          <strong>{tradesExecuted24h}</strong>
+                        </div>
+                        <div className="profile-broker-row">
+                          <span>LLM status</span>
+                          <strong className={llmHealthy ? 'positive' : 'negative'}>{llmStatusText}</strong>
+                        </div>
+                        <div className="profile-broker-note">Last analyze run: {agentLastRunText}</div>
+                        <div className="profile-broker-note">Last trade execution: {lastTradeRunText}</div>
                       </div>
                     </div>
                   )}
@@ -1134,20 +1184,6 @@ function App() {
               <div className="dash-status-detail">
                 {portfolio?.positions?.length || 0} positions &middot; {formatCurrency(portfolio?.account?.portfolio_value || 0)}
               </div>
-              <div className="dash-agent-line">
-                <span>Agent runs (24h)</span>
-                <strong>{runsLast24h}</strong>
-              </div>
-              <div className="dash-agent-line">
-                <span>Trades executed (24h)</span>
-                <strong>{tradesExecuted24h}</strong>
-              </div>
-              <div className="dash-agent-line">
-                <span>LLM status</span>
-                <strong className={llmHealthy ? 'positive' : 'negative'}>{llmStatusText}</strong>
-              </div>
-              <div className="dash-agent-footnote">Last analyze run: {agentLastRunText}</div>
-              <div className="dash-agent-footnote">Last trade execution: {lastTradeRunText}</div>
             </div>
           </div>
 

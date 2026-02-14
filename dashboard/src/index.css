@@ -61,6 +61,7 @@ body {
 .header-left {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 20px;
 }
 
@@ -85,6 +86,31 @@ body {
   font-size: 13px;
   border: 1px solid var(--border-color);
   backdrop-filter: blur(8px);
+}
+
+.ibkr-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--glass);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ibkr-badge.connected {
+  color: #9df6da;
+}
+
+.ibkr-badge.disconnected {
+  color: #ffb6bd;
+}
+
+.ibkr-icon {
+  font-size: 13px;
+  line-height: 1;
 }
 
 .status-dot {
@@ -935,6 +961,32 @@ td {
   border-top: 1px solid rgba(255, 255, 255, 0.05);
   padding: 12px 14px 14px;
   background: rgba(255, 255, 255, 0.01);
+}
+
+.profile-broker-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.profile-broker-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.profile-broker-row strong {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.profile-broker-note {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
 }
 
 .profile-dropdown .config-grid {
