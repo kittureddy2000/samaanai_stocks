@@ -726,10 +726,13 @@ class WatchlistView(APIView):
 
     def _get_watchlist_symbols(self, user):
         """Get user's watchlist symbols or default if none exists."""
-        from trading_api.models import WatchlistItem
-        user_items = WatchlistItem.objects.filter(user=user)
-        if user_items.exists():
-            return list(user_items.values_list('symbol', flat=True)), True
+        try:
+            from trading_api.models.watchlist import WatchlistItem
+            user_items = WatchlistItem.objects.filter(user=user)
+            if user_items.exists():
+                return list(user_items.values_list('symbol', flat=True)), True
+        except Exception as e:
+            logger.warning(f"Watchlist model/table unavailable, using defaults: {e}")
         return settings.TRADING_CONFIG['WATCHLIST'], False
 
     def get(self, request):
@@ -792,7 +795,11 @@ class WatchlistView(APIView):
     def post(self, request):
         """Add a symbol to user's watchlist."""
         start_time = time.time()
-        from trading_api.models import WatchlistItem
+        try:
+            from trading_api.models.watchlist import WatchlistItem
+        except Exception as e:
+            logger.error(f"WatchlistView.post model import failed: {e}")
+            return Response({'error': 'Watchlist service unavailable'}, status=503)
 
         symbol = request.data.get('symbol', '').upper().strip()
         if not symbol:
@@ -826,7 +833,11 @@ class WatchlistView(APIView):
     def delete(self, request):
         """Remove a symbol from user's watchlist."""
         start_time = time.time()
-        from trading_api.models import WatchlistItem
+        try:
+            from trading_api.models.watchlist import WatchlistItem
+        except Exception as e:
+            logger.error(f"WatchlistView.delete model import failed: {e}")
+            return Response({'error': 'Watchlist service unavailable'}, status=503)
 
         symbol = request.data.get('symbol', '').upper().strip()
         if not symbol:
