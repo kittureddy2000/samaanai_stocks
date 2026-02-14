@@ -488,7 +488,13 @@ class PortfolioView(APIView):
                 (daily_change / last_equity * 100)
                 if last_equity > 0 else 0
             )
-            initial_capital = float(settings.TRADING_CONFIG.get('INITIAL_CAPITAL', 1_000_000))
+            import os
+            initial_capital = float(
+                os.environ.get(
+                    'INITIAL_CAPITAL',
+                    settings.TRADING_CONFIG.get('INITIAL_CAPITAL', 1_000_000)
+                )
+            )
             portfolio_value = float(account['portfolio_value'])
             overall_change = portfolio_value - initial_capital
             overall_change_pct = (
@@ -571,7 +577,13 @@ class PortfolioView(APIView):
             f"snapshot={snapshot.timestamp.isoformat()}, {len(positions)} positions"
         )
 
-        initial_capital = float(settings.TRADING_CONFIG.get('INITIAL_CAPITAL', 1_000_000))
+        import os
+        initial_capital = float(
+            os.environ.get(
+                'INITIAL_CAPITAL',
+                settings.TRADING_CONFIG.get('INITIAL_CAPITAL', 1_000_000)
+            )
+        )
         portfolio_value = float(snapshot.portfolio_value)
         overall_change = portfolio_value - initial_capital
         overall_change_pct = (
@@ -1119,7 +1131,12 @@ class ConfigView(APIView):
             'min_confidence': trading_config['MIN_CONFIDENCE'] * 100,
             'stop_loss_pct': trading_config['STOP_LOSS_PCT'] * 100,
             'take_profit_pct': trading_config['TAKE_PROFIT_PCT'] * 100,
-            'initial_capital': trading_config.get('INITIAL_CAPITAL', 1000000),
+            'initial_capital': float(
+                os.environ.get(
+                    'INITIAL_CAPITAL',
+                    trading_config.get('INITIAL_CAPITAL', 1000000)
+                )
+            ),
         })
 
 
