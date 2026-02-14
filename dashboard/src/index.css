@@ -1631,6 +1631,16 @@ td {
   font-weight: 600;
 }
 
+.premium-cell {
+  color: #90e6ff;
+  font-weight: 600;
+}
+
+.annualized-cell {
+  color: #9df6da;
+  font-weight: 700;
+}
+
 .warn {
   color: var(--accent-yellow);
   font-weight: 600;

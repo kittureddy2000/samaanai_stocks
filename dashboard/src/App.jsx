@@ -61,6 +61,61 @@ const formatPercent = (value) => {
   return `${sign}${value.toFixed(2)}%`;
 };
 
+const computePremiumPct = (premium, underlyingPrice) => {
+  const p = Number(premium);
+  const u = Number(underlyingPrice);
+  if (!Number.isFinite(p) || !Number.isFinite(u) || p <= 0 || u <= 0) return null;
+  return (p / u) * 100;
+};
+
+const computeAnnualizedPct = (premiumPct, daysToExpiry) => {
+  const pct = Number(premiumPct);
+  const dte = Number(daysToExpiry);
+  if (!Number.isFinite(pct) || !Number.isFinite(dte) || dte <= 0) return null;
+  return pct * (365 / dte);
+};
+
+const enrichOptionChainPayload = (payload) => {
+  if (!payload) return payload;
+  const currentPrice = Number(payload.current_price) || 0;
+
+  const options = (payload.options || []).map((opt) => {
+    const last = Number(opt.last_price) || 0;
+    const bid = Number(opt.bid) || 0;
+    const ask = Number(opt.ask) || 0;
+    const days = Number(opt.days_to_expiry);
+    const mid = bid > 0 && ask > 0 ? (bid + ask) / 2 : 0;
+    const premium = last > 0 ? last : mid;
+    const premiumPct = computePremiumPct(premium, currentPrice);
+    const annualizedPct = computeAnnualizedPct(premiumPct, days);
+    return {
+      ...opt,
+      premium_pct: premiumPct,
+      annualized_pct: annualizedPct,
+    };
+  });
+
+  let recommendation = payload.sell_recommendation;
+  if (recommendation) {
+    const recPremiumPct = computePremiumPct(recommendation.premium, currentPrice);
+    const recAnnualizedPct = computeAnnualizedPct(
+      recPremiumPct,
+      recommendation.days_to_expiry
+    );
+    recommendation = {
+      ...recommendation,
+      premium_pct: recPremiumPct,
+      annualized_pct: recAnnualizedPct,
+    };
+  }
+
+  return {
+    ...payload,
+    options,
+    sell_recommendation: recommendation,
+  };
+};
+
 // Format market cap
 const formatMarketCap = (value) => {
   if (!value) return '--';
@@ -95,7 +150,7 @@ function OptionChainPage() {
     setError(null);
     try {
       const result = await getOptionChain(formData.symbol, formData.strike, formData.type);
-      setData(result);
+      setData(enrichOptionChainPayload(result));
     } catch (err) {
       // Fallback: show chain data even if LLM recommendation times out.
       try {
@@ -106,7 +161,7 @@ function OptionChainPage() {
           false
         );
         fallback.recommendation_error = 'LLM recommendation timed out. Showing live chain data only.';
-        setData(fallback);
+        setData(enrichOptionChainPayload(fallback));
       } catch (fallbackErr) {
         setError(
           fallbackErr.response?.data?.error ||
@@ -260,8 +315,32 @@ function OptionChainPage() {
                   <strong>${Number(recommendation.premium || 0).toFixed(2)}</strong>
                 </div>
                 <div className="oc-ai-metric">
+                  <span>Premium %</span>
+                  <strong>
+                    {recommendation.premium_pct != null
+                      ? `${Number(recommendation.premium_pct).toFixed(2)}%`
+                      : '--'}
+                  </strong>
+                </div>
+                <div className="oc-ai-metric">
+                  <span>Annualized %</span>
+                  <strong>
+                    {recommendation.annualized_pct != null
+                      ? `${Number(recommendation.annualized_pct).toFixed(2)}%`
+                      : '--'}
+                  </strong>
+                </div>
+                <div className="oc-ai-metric">
                   <span>Confidence</span>
                   <strong>{Math.round(Number(recommendation.confidence || 0) * 100)}%</strong>
+                </div>
+                <div className="oc-ai-metric">
+                  <span>DTE</span>
+                  <strong>
+                    {recommendation.days_to_expiry != null
+                      ? `${Number(recommendation.days_to_expiry)} days`
+                      : '--'}
+                  </strong>
                 </div>
                 <div className="oc-ai-metric">
                   <span>Liquidity</span>
@@ -364,6 +443,8 @@ function OptionChainPage() {
                       <SortTh label="Expiration" sortKey="expiration" currentKey={ocSortKey} currentDir={ocSortDir} onSort={ocHandleSort} />
                       <SortTh label="Days" sortKey="days_to_expiry" currentKey={ocSortKey} currentDir={ocSortDir} onSort={ocHandleSort} />
                       <SortTh label="Last" sortKey="last_price" currentKey={ocSortKey} currentDir={ocSortDir} onSort={ocHandleSort} />
+                      <SortTh label="Prem %" sortKey="premium_pct" currentKey={ocSortKey} currentDir={ocSortDir} onSort={ocHandleSort} />
+                      <SortTh label="Ann %" sortKey="annualized_pct" currentKey={ocSortKey} currentDir={ocSortDir} onSort={ocHandleSort} />
                       <SortTh label="Bid" sortKey="bid" currentKey={ocSortKey} currentDir={ocSortDir} onSort={ocHandleSort} />
                       <SortTh label="Ask" sortKey="ask" currentKey={ocSortKey} currentDir={ocSortDir} onSort={ocHandleSort} />
                       <SortTh label="Vol" sortKey="volume" currentKey={ocSortKey} currentDir={ocSortDir} onSort={ocHandleSort} />
@@ -378,7 +459,7 @@ function OptionChainPage() {
                   <tbody>
                     {sortedOptions.length === 0 ? (
                       <tr>
-                        <td colSpan="12" className="oc-empty">No options found for this strike</td>
+                        <td colSpan="14" className="oc-empty">No options found for this strike</td>
                       </tr>
                     ) : (
                       sortedOptions.map((opt, i) => (
@@ -386,6 +467,12 @@ function OptionChainPage() {
                           <td className="oc-exp-cell">{opt.expiration}</td>
                           <td className={opt.days_to_expiry <= 7 ? 'warn' : ''}>{opt.days_to_expiry}</td>
                           <td>${opt.last_price.toFixed(2)}</td>
+                          <td className="premium-cell">
+                            {opt.premium_pct != null ? `${Number(opt.premium_pct).toFixed(2)}%` : '--'}
+                          </td>
+                          <td className="annualized-cell">
+                            {opt.annualized_pct != null ? `${Number(opt.annualized_pct).toFixed(2)}%` : '--'}
+                          </td>
                           <td>${opt.bid.toFixed(2)}</td>
                           <td>${opt.ask.toFixed(2)}</td>
                           <td>{opt.volume.toLocaleString()}</td>
