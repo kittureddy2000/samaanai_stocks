@@ -118,6 +118,11 @@ export const getOperationsSummary = async (days = 14) => {
     return response.data;
 };
 
+export const runAnalyzeNow = async () => {
+    const response = await api.post('/api/analyze', {});
+    return response.data;
+};
+
 export const getConfig = async () => {
     const response = await api.get('/api/config');
     return response.data;

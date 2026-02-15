@@ -1239,6 +1239,21 @@ td {
   margin-bottom: 16px;
 }
 
+.operations-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.operations-analyze-result {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(77, 166, 255, 0.35);
+  background: rgba(77, 166, 255, 0.1);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
 .operations-stat-row {
   display: flex;
   align-items: center;
@@ -1289,6 +1304,11 @@ td {
 @media (max-width: 640px) {
   .operations-mini-grid {
     grid-template-columns: 1fr;
+  }
+
+  .operations-actions {
+    flex-direction: column;
+    width: 100%;
   }
 }
 

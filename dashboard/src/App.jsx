@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { getPortfolio, getRisk, getMarket, getWatchlist, getTrades, getAgentStatus, getOperationsSummary, getConfig, updateConfig, getCurrentUser, getLoginUrl, register, login, logout, getOptionChain, getCollarStrategy, addToWatchlist, removeFromWatchlist, setTokens } from './api';
+import { getPortfolio, getRisk, getMarket, getWatchlist, getTrades, getAgentStatus, getOperationsSummary, runAnalyzeNow, getConfig, updateConfig, getCurrentUser, getLoginUrl, register, login, logout, getOptionChain, getCollarStrategy, addToWatchlist, removeFromWatchlist, setTokens } from './api';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import './App.css';
 
@@ -875,7 +875,7 @@ function SettingsPage({ config, onSave, saveState }) {
 // ============================================================
 // Operations Page Component
 // ============================================================
-function OperationsPage({ data, loading, error, onRefresh }) {
+function OperationsPage({ data, loading, error, onRefresh, onRunAnalyze, analyzeState }) {
   const checks = data?.checks || {};
   const ibkr = checks.ibkr || {};
   const gemini = checks.gemini || {};
@@ -896,12 +896,25 @@ function OperationsPage({ data, loading, error, onRefresh }) {
             Verify trade execution, IBKR gateway health, and Gemini reliability.
           </p>
         </div>
-        <button className="btn-refresh" onClick={onRefresh} disabled={loading}>
-          {loading ? 'Refreshing...' : 'Refresh Ops'}
-        </button>
+        <div className="operations-actions">
+          <button className="btn-refresh" onClick={onRunAnalyze} disabled={analyzeState.running}>
+            {analyzeState.running ? 'Running Analyze...' : 'Run Analyze Now'}
+          </button>
+          <button className="btn-refresh" onClick={onRefresh} disabled={loading}>
+            {loading ? 'Refreshing...' : 'Refresh Ops'}
+          </button>
+        </div>
       </div>
 
       {error && <div className="oc-form-error">{error}</div>}
+      {analyzeState.error && <div className="oc-form-error">{analyzeState.error}</div>}
+      {analyzeState.result && (
+        <div className="operations-analyze-result">
+          Analyze result: <strong>{analyzeState.result.status || 'unknown'}</strong>
+          {analyzeState.result.message ? ` - ${analyzeState.result.message}` : ''}
+          {analyzeState.result.trades_executed != null ? ` (${analyzeState.result.trades_executed} trades executed)` : ''}
+        </div>
+      )}
 
       <div className="main-grid operations-grid">
         <div className="card">
@@ -1176,6 +1189,11 @@ function App() {
   const [operationsSummary, setOperationsSummary] = useState(null);
   const [operationsLoading, setOperationsLoading] = useState(false);
   const [operationsError, setOperationsError] = useState('');
+  const [analyzeRunState, setAnalyzeRunState] = useState({
+    running: false,
+    error: '',
+    result: null,
+  });
   const profileRef = useRef(null);
 
   // Handle OAuth callback - extract tokens from URL on app load
@@ -1306,6 +1324,22 @@ function App() {
       setOperationsLoading(false);
     }
   }, []);
+
+  const handleRunAnalyzeNow = useCallback(async () => {
+    setAnalyzeRunState({ running: true, error: '', result: null });
+    try {
+      const result = await runAnalyzeNow();
+      setAnalyzeRunState({ running: false, error: '', result });
+      await fetchOperationsData();
+      await fetchData();
+    } catch (error) {
+      setAnalyzeRunState({
+        running: false,
+        error: error.response?.data?.message || error.response?.data?.error || 'Failed to run analyze now',
+        result: null,
+      });
+    }
+  }, [fetchData, fetchOperationsData]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -1828,6 +1862,8 @@ function App() {
           loading={operationsLoading}
           error={operationsError}
           onRefresh={fetchOperationsData}
+          onRunAnalyze={handleRunAnalyzeNow}
+          analyzeState={analyzeRunState}
         />
       )}
     </div>
