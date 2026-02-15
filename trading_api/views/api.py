@@ -1493,7 +1493,41 @@ class ConfigView(APIView):
             return Response({'success': False, 'error': 'No fields provided to update'}, status=400)
 
         from trading_api.models import AgentSettings
-        settings_obj, _ = AgentSettings.objects.get_or_create(singleton_key='default')
+        from django.db.utils import OperationalError, ProgrammingError
+
+        try:
+            settings_obj, _ = AgentSettings.objects.get_or_create(singleton_key='default')
+        except (ProgrammingError, OperationalError) as exc:
+            # Self-heal path: if schema migration did not apply yet, attempt
+            # to run trading_api migrations and retry once.
+            err = str(exc).lower()
+            missing_table = (
+                'agent_settings' in err and (
+                    'does not exist' in err
+                    or 'undefined table' in err
+                    or 'no such table' in err
+                )
+            )
+            if not missing_table:
+                raise
+
+            logger.warning("AgentSettings table missing; attempting migration before retry")
+            try:
+                from django.core.management import call_command
+                call_command('migrate', 'trading_api', interactive=False, verbosity=0)
+                settings_obj, _ = AgentSettings.objects.get_or_create(singleton_key='default')
+            except Exception as migration_exc:
+                logger.error(f"ConfigView.post migration self-heal failed: {migration_exc}")
+                return Response(
+                    {
+                        'success': False,
+                        'error': (
+                            'Settings storage is not ready yet. '
+                            'Please retry in a minute after migrations complete.'
+                        ),
+                    },
+                    status=503,
+                )
 
         if 'analysis_interval' in updates:
             settings_obj.analysis_interval_minutes = updates['analysis_interval']
