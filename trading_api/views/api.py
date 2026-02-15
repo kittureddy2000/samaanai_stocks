@@ -2146,6 +2146,8 @@ class AnalyzeView(APIView):
             analysis_interval_minutes = int(effective_settings.get('analysis_interval', 15))
             last_analyze_run = AgentRunLog.objects.filter(
                 run_type='analyze'
+            ).exclude(
+                status='skipped'
             ).order_by('-created_at').first()
             if last_analyze_run:
                 elapsed_since_last = timezone.now() - last_analyze_run.created_at
