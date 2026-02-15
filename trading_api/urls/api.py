@@ -24,6 +24,7 @@ urlpatterns = [
 
     # Agent run health/history
     path('agent-status', api.AgentStatusView.as_view(), name='api-agent-status'),
+    path('operations-summary', api.OperationsSummaryView.as_view(), name='api-operations-summary'),
     
     # Trading configuration
     path('config', api.ConfigView.as_view(), name='api-config'),

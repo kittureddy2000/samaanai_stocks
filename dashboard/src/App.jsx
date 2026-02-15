@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { getPortfolio, getRisk, getMarket, getWatchlist, getTrades, getAgentStatus, getConfig, updateConfig, getCurrentUser, getLoginUrl, register, login, logout, getOptionChain, getCollarStrategy, addToWatchlist, removeFromWatchlist, setTokens } from './api';
+import { getPortfolio, getRisk, getMarket, getWatchlist, getTrades, getAgentStatus, getOperationsSummary, getConfig, updateConfig, getCurrentUser, getLoginUrl, register, login, logout, getOptionChain, getCollarStrategy, addToWatchlist, removeFromWatchlist, setTokens } from './api';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import './App.css';
 
@@ -873,6 +873,158 @@ function SettingsPage({ config, onSave, saveState }) {
 
 
 // ============================================================
+// Operations Page Component
+// ============================================================
+function OperationsPage({ data, loading, error, onRefresh }) {
+  const checks = data?.checks || {};
+  const ibkr = checks.ibkr || {};
+  const gemini = checks.gemini || {};
+  const today = data?.today || {};
+  const effective = data?.effective_settings || {};
+  const lastAnalyze = data?.last_analyze_settings || {};
+  const enabledIndicators = effective.indicators_enabled || [];
+  const disabledIndicators = effective.indicators_disabled || [];
+  const lastAnalyzeIndicators = lastAnalyze.indicators_enabled || [];
+
+  return (
+    <div className="operations-page">
+      <div className="dash-header-row">
+        <div>
+          <div className="dash-label">OPERATIONS MONITOR</div>
+          <h2 className="dash-title">System Health and Daily Activity</h2>
+          <p className="dash-subtitle">
+            Verify trade execution, IBKR gateway health, and Gemini reliability.
+          </p>
+        </div>
+        <button className="btn-refresh" onClick={onRefresh} disabled={loading}>
+          {loading ? 'Refreshing...' : 'Refresh Ops'}
+        </button>
+      </div>
+
+      {error && <div className="oc-form-error">{error}</div>}
+
+      <div className="main-grid operations-grid">
+        <div className="card">
+          <div className="card-label">TODAY</div>
+          <h2>Execution</h2>
+          <div className="operations-stat-row"><span>Analyze Runs</span><strong>{today.analyze_runs || 0}</strong></div>
+          <div className="operations-stat-row"><span>Trades Executed</span><strong>{today.trades_executed || 0}</strong></div>
+          <div className="operations-stat-row"><span>Analyze Errors</span><strong>{today.analyze_errors || 0}</strong></div>
+          <div className="operations-stat-row"><span>LLM Failures</span><strong>{today.llm_failures || 0}</strong></div>
+        </div>
+
+        <div className="card">
+          <div className="card-label">HEALTH CHECKS</div>
+          <h2>Connections</h2>
+          <div className="operations-stat-row">
+            <span>IBKR Gateway</span>
+            <strong className={ibkr.healthy ? 'positive' : 'negative'}>
+              {ibkr.healthy ? 'Healthy' : 'Issue'}
+            </strong>
+          </div>
+          <div className="operations-stat-row"><span>IBKR TCP</span><strong>{ibkr.tcp_status || '--'}</strong></div>
+          <div className="operations-stat-row">
+            <span>Gemini API</span>
+            <strong className={gemini.healthy_24h ? 'positive' : 'negative'}>
+              {gemini.healthy_24h ? 'Healthy' : 'Issue'}
+            </strong>
+          </div>
+          <div className="operations-stat-row">
+            <span>Gemini Key</span>
+            <strong>{gemini.api_key_configured ? 'Configured' : 'Missing'}</strong>
+          </div>
+        </div>
+
+        <div className="card operations-settings-card">
+          <div className="card-label">EFFECTIVE SETTINGS</div>
+          <h2>Applied at Runtime</h2>
+          <div className="operations-mini-grid">
+            <div className="config-item"><span className="label">Interval</span><span className="value">{effective.analysis_interval || '--'} min</span></div>
+            <div className="config-item"><span className="label">Min Confidence</span><span className="value">{effective.min_confidence || '--'}%</span></div>
+            <div className="config-item"><span className="label">Max Position</span><span className="value">{effective.max_position_pct || '--'}%</span></div>
+            <div className="config-item"><span className="label">Max Daily Loss</span><span className="value">{effective.max_daily_loss_pct || '--'}%</span></div>
+          </div>
+          <div className="operations-indicator-groups">
+            <div><strong>Indicators ON:</strong> {enabledIndicators.length ? enabledIndicators.join(', ') : 'None'}</div>
+            <div><strong>Indicators OFF:</strong> {disabledIndicators.length ? disabledIndicators.join(', ') : 'None'}</div>
+            <div><strong>Last Analyze Used:</strong> {lastAnalyzeIndicators.length ? lastAnalyzeIndicators.join(', ') : 'No run yet'}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="card operations-table-card">
+        <div className="card-label">DAILY LOGS</div>
+        <h2>Last {data?.days || 14} Days</h2>
+        <div className="positions">
+          <table className="positions-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Analyze</th>
+                <th>Success</th>
+                <th>Trades</th>
+                <th>IBKR Issues</th>
+                <th>Gemini Key</th>
+                <th>Gemini Rate Limit</th>
+                <th>Gemini Other</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(data?.daily || []).map((day) => (
+                <tr key={day.date}>
+                  <td>{day.date}</td>
+                  <td>{day.analyze_runs}</td>
+                  <td>{day.analyze_success}</td>
+                  <td>{day.trades_executed}</td>
+                  <td className={day.ibkr_issues > 0 ? 'negative' : ''}>{day.ibkr_issues}</td>
+                  <td className={day.gemini_key_issues > 0 ? 'negative' : ''}>{day.gemini_key_issues}</td>
+                  <td className={day.gemini_rate_limit_issues > 0 ? 'negative' : ''}>{day.gemini_rate_limit_issues}</td>
+                  <td className={day.gemini_other_issues > 0 ? 'negative' : ''}>{day.gemini_other_issues}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card operations-table-card">
+        <div className="card-label">RECENT EVENTS</div>
+        <h2>Latest Operational Issues</h2>
+        <div className="positions">
+          <table className="positions-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Issue</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(data?.recent_events || []).length === 0 ? (
+                <tr><td colSpan="5" className="empty-state">No recent operational issues.</td></tr>
+              ) : (
+                (data.recent_events || []).map((event, idx) => (
+                  <tr key={`${event.time}-${idx}`}>
+                    <td>{event.time ? new Date(event.time).toLocaleString() : '--'}</td>
+                    <td>{event.run_type || '--'}</td>
+                    <td>{event.status || '--'}</td>
+                    <td>{event.issue_type || '--'}</td>
+                    <td>{event.message || '--'}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ============================================================
 // Auth Page Component
 // ============================================================
 function AuthPage({ onAuthSuccess }) {
@@ -1021,6 +1173,9 @@ function App() {
     error: '',
     success: '',
   });
+  const [operationsSummary, setOperationsSummary] = useState(null);
+  const [operationsLoading, setOperationsLoading] = useState(false);
+  const [operationsError, setOperationsError] = useState('');
   const profileRef = useRef(null);
 
   // Handle OAuth callback - extract tokens from URL on app load
@@ -1139,6 +1294,19 @@ function App() {
     }
   }, []);
 
+  const fetchOperationsData = useCallback(async () => {
+    setOperationsLoading(true);
+    setOperationsError('');
+    try {
+      const summary = await getOperationsSummary(14);
+      setOperationsSummary(summary);
+    } catch (error) {
+      setOperationsError(error.response?.data?.error || 'Failed to load operations summary');
+    } finally {
+      setOperationsLoading(false);
+    }
+  }, []);
+
   const fetchData = useCallback(async () => {
     try {
       const results = await Promise.allSettled([
@@ -1208,6 +1376,13 @@ function App() {
     const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
   }, [fetchData]);
+
+  useEffect(() => {
+    if (currentPage !== 'operations') return;
+    fetchOperationsData();
+    const interval = setInterval(fetchOperationsData, 60000);
+    return () => clearInterval(interval);
+  }, [currentPage, fetchOperationsData]);
 
   // Auth loading
   if (!authChecked) {
@@ -1303,6 +1478,16 @@ function App() {
                   >
                     <span>Settings</span>
                   </button>
+                  <button
+                    className="profile-submenu-trigger"
+                    onClick={() => {
+                      setCurrentPage('operations');
+                      setProfileOpen(false);
+                      setProfileSubmenu(null);
+                    }}
+                  >
+                    <span>Operations</span>
+                  </button>
 
                   <button
                     className={`profile-submenu-trigger ${profileSubmenu === 'broker' ? 'open' : ''}`}
@@ -1388,6 +1573,12 @@ function App() {
           onClick={() => setCurrentPage('collar')}
         >
           Collar Strategy
+        </button>
+        <button
+          className={`nav-tab ${currentPage === 'operations' ? 'active' : ''}`}
+          onClick={() => setCurrentPage('operations')}
+        >
+          Operations
         </button>
       </nav>
 
@@ -1631,6 +1822,14 @@ function App() {
       )}
       {currentPage === 'options' && <OptionChainPage />}
       {currentPage === 'collar' && <CollarStrategyPage />}
+      {currentPage === 'operations' && (
+        <OperationsPage
+          data={operationsSummary}
+          loading={operationsLoading}
+          error={operationsError}
+          onRefresh={fetchOperationsData}
+        />
+      )}
     </div>
   );
 }

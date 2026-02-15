@@ -113,6 +113,11 @@ export const getAgentStatus = async () => {
     return response.data;
 };
 
+export const getOperationsSummary = async (days = 14) => {
+    const response = await api.get('/api/operations-summary', { params: { days } });
+    return response.data;
+};
+
 export const getConfig = async () => {
     const response = await api.get('/api/config');
     return response.data;

@@ -77,7 +77,8 @@ class EmailNotifier:
         portfolio: Dict[str, Any],
         trades_today: List[Dict[str, Any]],
         analysis_runs: int,
-        risk_status: Dict[str, Any]
+        risk_status: Dict[str, Any],
+        operations_summary: Dict[str, Any] = None,
     ) -> bool:
         """Send daily trading summary email.
 
@@ -96,6 +97,15 @@ class EmailNotifier:
         daily_change = portfolio.get('daily_change', 0)
         daily_change_pct = portfolio.get('daily_change_pct', 0)
         positions = portfolio.get('positions', [])
+        operations_summary = operations_summary or {}
+        ops_today = operations_summary.get('today', {})
+        ops_checks = operations_summary.get('checks', {})
+        ops_recent = operations_summary.get('recent_events', [])[:5]
+
+        ibkr_check = ops_checks.get('ibkr', {})
+        gemini_check = ops_checks.get('gemini', {})
+        ibkr_status_text = "Healthy" if ibkr_check.get('healthy') else "Issue Detected"
+        gemini_status_text = "Healthy" if gemini_check.get('healthy_24h') else "Issue Detected"
 
         change_color = "#28a745" if daily_change >= 0 else "#dc3545"
         change_icon = "+" if daily_change >= 0 else ""
@@ -180,6 +190,46 @@ class EmailNotifier:
             <p style="color: #666;">No open positions. Portfolio is 100% cash.</p>
             """
 
+        events_html = ""
+        if ops_recent:
+            rows = ""
+            for event in ops_recent:
+                rows += f"""
+                <tr>
+                    <td style="padding: 8px; border-bottom: 1px solid #eee;">{event.get('time', '--')}</td>
+                    <td style="padding: 8px; border-bottom: 1px solid #eee;">{event.get('run_type', '--')}</td>
+                    <td style="padding: 8px; border-bottom: 1px solid #eee;">{event.get('status', '--')}</td>
+                    <td style="padding: 8px; border-bottom: 1px solid #eee;">{event.get('issue_type', '--')}</td>
+                    <td style="padding: 8px; border-bottom: 1px solid #eee;">{event.get('message', '--')}</td>
+                </tr>
+                """
+            events_html = f"""
+            <h3 style="color: #333; margin-top: 16px;">Recent Operational Events</h3>
+            <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+                <thead>
+                    <tr style="background-color: #f8f9fa;">
+                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #dee2e6;">Time</th>
+                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #dee2e6;">Type</th>
+                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #dee2e6;">Status</th>
+                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #dee2e6;">Issue</th>
+                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #dee2e6;">Message</th>
+                    </tr>
+                </thead>
+                <tbody>{rows}</tbody>
+            </table>
+            """
+
+        operations_html = f"""
+        <h2 style="color: #333; margin-top: 30px;">Operations Health</h2>
+        <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 14px;">
+            <p style="margin: 0 0 8px 0;"><strong>Analyze Runs:</strong> {ops_today.get('analyze_runs', 0)} | <strong>Trades:</strong> {ops_today.get('trades_executed', 0)}</p>
+            <p style="margin: 0 0 8px 0;"><strong>IBKR Gateway:</strong> {ibkr_status_text} ({ibkr_check.get('tcp_status', '--')})</p>
+            <p style="margin: 0 0 8px 0;"><strong>Gemini API:</strong> {gemini_status_text} | API Key Configured: {'Yes' if gemini_check.get('api_key_configured') else 'No'}</p>
+            <p style="margin: 0;"><strong>Issues Today:</strong> IBKR {ops_today.get('ibkr_issues', 0)}, Gemini Key {ops_today.get('gemini_key_issues', 0)}, Gemini Rate Limit {ops_today.get('gemini_rate_limit_issues', 0)}</p>
+        </div>
+        {events_html}
+        """
+
         html_content = f"""
         <!DOCTYPE html>
         <html>
@@ -221,6 +271,8 @@ class EmailNotifier:
 
                 {positions_html}
 
+                {operations_html}
+
                 <!-- Footer -->
                 <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; text-align: center; color: #666; font-size: 12px;">
                     <p>This is an automated summary from your LLM Trading Agent.</p>
@@ -252,6 +304,17 @@ TRADES TODAY: {len(trades_today)}
 POSITIONS: {len(positions)}
 {"No open positions." if not positions else chr(10).join([f"- {p.get('symbol')}: {p.get('qty')} shares @ ${p.get('current_price', 0):,.2f}" for p in positions])}
 
+OPERATIONS HEALTH
+-----------------
+Analyze Runs: {ops_today.get('analyze_runs', 0)}
+Trades Executed: {ops_today.get('trades_executed', 0)}
+IBKR Gateway: {ibkr_status_text} ({ibkr_check.get('tcp_status', '--')})
+Gemini API: {gemini_status_text} (API Key Configured: {"Yes" if gemini_check.get('api_key_configured') else "No"})
+Issues Today:
+- IBKR Issues: {ops_today.get('ibkr_issues', 0)}
+- Gemini Key Issues: {ops_today.get('gemini_key_issues', 0)}
+- Gemini Rate Limit Issues: {ops_today.get('gemini_rate_limit_issues', 0)}
+
 ---
 View Dashboard: https://trading.samaanai.com
         """
@@ -265,6 +328,18 @@ View Dashboard: https://trading.samaanai.com
 email_notifier = EmailNotifier()
 
 
-def send_daily_summary(portfolio: Dict, trades: List, analysis_runs: int, risk_status: Dict) -> bool:
+def send_daily_summary(
+    portfolio: Dict,
+    trades: List,
+    analysis_runs: int,
+    risk_status: Dict,
+    operations_summary: Dict[str, Any] = None,
+) -> bool:
     """Convenience function to send daily summary."""
-    return email_notifier.send_daily_summary(portfolio, trades, analysis_runs, risk_status)
+    return email_notifier.send_daily_summary(
+        portfolio,
+        trades,
+        analysis_runs,
+        risk_status,
+        operations_summary=operations_summary,
+    )

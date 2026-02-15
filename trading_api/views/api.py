@@ -5,6 +5,7 @@ Includes trade/position persistence, DB fallback, and diagnostic logging.
 """
 
 import logging
+import os
 import time
 import threading
 from datetime import timedelta
@@ -193,6 +194,183 @@ def apply_runtime_trading_settings():
     except Exception as exc:
         logger.warning(f"Failed to apply runtime trading settings: {exc}")
     return effective
+
+
+def build_runtime_settings_snapshot(effective_settings):
+    """Compact runtime settings snapshot for diagnostics/logging."""
+    indicator_settings = _normalize_indicator_settings(
+        effective_settings.get('indicator_settings')
+    )
+    enabled = [key for key, is_on in indicator_settings.items() if is_on]
+    disabled = [key for key, is_on in indicator_settings.items() if not is_on]
+    return {
+        'analysis_interval': int(effective_settings.get('analysis_interval', 15)),
+        'max_position_pct': float(effective_settings.get('max_position_pct', 10)),
+        'max_daily_loss_pct': float(effective_settings.get('max_daily_loss_pct', 3)),
+        'min_confidence': float(effective_settings.get('min_confidence', 70)),
+        'stop_loss_pct': float(effective_settings.get('stop_loss_pct', 5)),
+        'take_profit_pct': float(effective_settings.get('take_profit_pct', 10)),
+        'indicators_enabled': enabled,
+        'indicators_disabled': disabled,
+    }
+
+
+def classify_operational_issue(message='', llm_error=''):
+    """Classify operational errors for dashboard/email rollups."""
+    text = f"{message or ''} {llm_error or ''}".lower()
+
+    gemini_rate_limit_keywords = (
+        'rate limit', '429', 'quota', 'resource_exhausted', 'too many requests'
+    )
+    gemini_key_keywords = (
+        'api key', 'api_key', 'invalid_api_key', 'api key not found', 'apikey not found'
+    )
+    gemini_keywords = (
+        'gemini', 'generativelanguage.googleapis.com', 'googleapis.com'
+    )
+    ibkr_keywords = (
+        'ibkr', 'gateway', 'not connected', 'connection refused', 'timed out',
+        'timeout', 'socket', 'broken pipe', 'connection reset'
+    )
+
+    if any(k in text for k in gemini_rate_limit_keywords):
+        return 'gemini_rate_limit'
+    if any(k in text for k in gemini_key_keywords):
+        return 'gemini_key'
+    if any(k in text for k in gemini_keywords):
+        return 'gemini_other'
+    if any(k in text for k in ibkr_keywords):
+        return 'ibkr_gateway'
+    return 'other'
+
+
+def build_operations_summary(days=14):
+    """Build operations health summary for UI/email."""
+    from trading_api.models.trade import AgentRunLog
+
+    days = max(1, min(int(days or 14), 90))
+    now = timezone.now()
+    since = now - timedelta(days=days)
+
+    effective_settings = apply_runtime_trading_settings()
+    settings_snapshot = build_runtime_settings_snapshot(effective_settings)
+    host, port, ibkr_connection = ConfigView._test_ibkr_connection()
+
+    runs = list(
+        AgentRunLog.objects.filter(created_at__gte=since)
+        .order_by('-created_at')
+        .values(
+            'run_type', 'status', 'message', 'llm_ok', 'llm_error',
+            'trades_recommended', 'trades_executed', 'created_at', 'details'
+        )
+    )
+
+    day_keys = [
+        (timezone.localdate(now - timedelta(days=offset))).isoformat()
+        for offset in range(days - 1, -1, -1)
+    ]
+    per_day = {
+        day_key: {
+            'date': day_key,
+            'analyze_runs': 0,
+            'analyze_success': 0,
+            'analyze_skipped': 0,
+            'analyze_errors': 0,
+            'llm_failures': 0,
+            'trades_executed': 0,
+            'ibkr_issues': 0,
+            'gemini_rate_limit_issues': 0,
+            'gemini_key_issues': 0,
+            'gemini_other_issues': 0,
+        }
+        for day_key in day_keys
+    }
+
+    recent_events = []
+    last_analyze_settings = None
+    today_key = timezone.localdate(now).isoformat()
+
+    for run in runs:
+        run_day = timezone.localtime(run['created_at']).date().isoformat()
+        if run_day not in per_day:
+            continue
+
+        bucket = per_day[run_day]
+        run_type = run.get('run_type')
+        status = (run.get('status') or '').lower()
+        llm_ok = run.get('llm_ok')
+        message = run.get('message') or ''
+        llm_error = run.get('llm_error') or ''
+        details = run.get('details') or {}
+
+        if run_type == 'analyze':
+            bucket['analyze_runs'] += 1
+            if status == 'success':
+                bucket['analyze_success'] += 1
+            elif status == 'skipped':
+                bucket['analyze_skipped'] += 1
+            elif status in ('error', 'no_response'):
+                bucket['analyze_errors'] += 1
+
+            if llm_ok is False:
+                bucket['llm_failures'] += 1
+
+            if last_analyze_settings is None and isinstance(details, dict):
+                last_analyze_settings = details.get('settings')
+
+        bucket['trades_executed'] += int(run.get('trades_executed') or 0)
+
+        issue_type = classify_operational_issue(message, llm_error)
+        if issue_type == 'ibkr_gateway':
+            bucket['ibkr_issues'] += 1
+        elif issue_type == 'gemini_rate_limit':
+            bucket['gemini_rate_limit_issues'] += 1
+        elif issue_type == 'gemini_key':
+            bucket['gemini_key_issues'] += 1
+        elif issue_type == 'gemini_other':
+            bucket['gemini_other_issues'] += 1
+
+        if status in ('error', 'fallback', 'no_response'):
+            recent_events.append({
+                'time': timezone.localtime(run['created_at']).isoformat(),
+                'run_type': run_type,
+                'status': status,
+                'issue_type': issue_type,
+                'message': message or llm_error or 'Issue recorded',
+            })
+
+    today = per_day.get(today_key, next(iter(per_day.values())))
+
+    has_gemini_key = bool(
+        settings.TRADING_CONFIG.get('GEMINI_API_KEY')
+        or os.environ.get('GEMINI_API_KEY')
+    )
+
+    return {
+        'days': days,
+        'generated_at': now.isoformat(),
+        'checks': {
+            'ibkr': {
+                'host': host,
+                'port': port,
+                'tcp_status': ibkr_connection,
+                'healthy': ibkr_connection == 'success',
+            },
+            'gemini': {
+                'api_key_configured': has_gemini_key,
+                'healthy_24h': (
+                    today.get('gemini_key_issues', 0) == 0
+                    and today.get('gemini_rate_limit_issues', 0) == 0
+                    and today.get('gemini_other_issues', 0) == 0
+                ),
+            },
+        },
+        'effective_settings': settings_snapshot,
+        'last_analyze_settings': last_analyze_settings or settings_snapshot,
+        'today': today,
+        'daily': [per_day[key] for key in day_keys],
+        'recent_events': recent_events[:30],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1165,6 +1343,26 @@ class AgentStatusView(APIView):
             },
             'recent_runs': recent_runs,
         })
+
+
+class OperationsSummaryView(APIView):
+    """Operational health summary for monitoring app behavior."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        start_time = time.time()
+        logger.info("OperationsSummaryView.get called")
+        days = request.query_params.get('days', 14)
+        try:
+            summary = build_operations_summary(days=days)
+            elapsed = time.time() - start_time
+            logger.info(f"OperationsSummaryView.get completed in {elapsed:.2f}s")
+            return Response(summary)
+        except Exception as e:
+            elapsed = time.time() - start_time
+            logger.error(f"OperationsSummaryView.get failed in {elapsed:.2f}s: {e}")
+            return Response({'error': str(e)}, status=500)
 
 
 class ConfigView(APIView):
@@ -2140,6 +2338,7 @@ class AnalyzeView(APIView):
 
             trading_client = get_trading_client()
             effective_settings = apply_runtime_trading_settings()
+            settings_snapshot = build_runtime_settings_snapshot(effective_settings)
 
             # Respect configured analysis interval even if scheduler triggers more frequently.
             from trading_api.models.trade import AgentRunLog
@@ -2168,6 +2367,7 @@ class AnalyzeView(APIView):
                         llm_ok=None,
                         trades_recommended=0,
                         trades_executed=0,
+                        details={'settings': settings_snapshot, 'skip_reason': 'analysis_interval'},
                     )
                     return Response({
                         'status': 'skipped',
@@ -2189,6 +2389,7 @@ class AnalyzeView(APIView):
                     llm_ok=None,
                     trades_recommended=0,
                     trades_executed=0,
+                    details={'settings': settings_snapshot, 'skip_reason': 'market_closed'},
                 )
                 return Response({
                     'status': 'skipped',
@@ -2222,6 +2423,7 @@ class AnalyzeView(APIView):
                     llm_error=llm_error,
                     trades_recommended=0,
                     trades_executed=0,
+                    details={'settings': settings_snapshot},
                 )
                 return Response({'status': 'no_response', 'message': 'No LLM response'})
 
@@ -2245,7 +2447,10 @@ class AnalyzeView(APIView):
                     llm_ok=True,
                     trades_recommended=len(response.trades),
                     trades_executed=0,
-                    details={'analysis_summary': response.analysis_summary},
+                    details={
+                        'analysis_summary': response.analysis_summary,
+                        'settings': settings_snapshot,
+                    },
                 )
                 return Response({
                     'status': 'no_trades',
@@ -2281,7 +2486,10 @@ class AnalyzeView(APIView):
                 llm_ok=True,
                 trades_recommended=len(valid_trades),
                 trades_executed=len(executed),
-                details={'analysis_summary': response.analysis_summary},
+                details={
+                    'analysis_summary': response.analysis_summary,
+                    'settings': settings_snapshot,
+                },
             )
 
             return Response({
@@ -2304,6 +2512,11 @@ class AnalyzeView(APIView):
                 message='Analyze run failed',
                 llm_ok=False,
                 llm_error=str(e),
+                details={
+                    'settings': build_runtime_settings_snapshot(
+                        apply_runtime_trading_settings()
+                    )
+                },
             )
             return Response({'status': 'error', 'message': str(e)}, status=500)
 
@@ -2373,11 +2586,17 @@ class DailySummaryView(APIView):
             # Get risk status
             risk_status = risk_manager.get_risk_status(account)
 
-            # Estimate analysis runs
-            analysis_runs = 14
+            operations_summary = build_operations_summary(days=7)
+            analysis_runs = int(operations_summary.get('today', {}).get('analyze_runs', 0))
 
             # Send email
-            email_sent = send_daily_summary(portfolio, trades_today, analysis_runs, risk_status)
+            email_sent = send_daily_summary(
+                portfolio,
+                trades_today,
+                analysis_runs,
+                risk_status,
+                operations_summary=operations_summary,
+            )
 
             # Also send to Slack
             _, notify_portfolio = get_slack()
@@ -2407,6 +2626,7 @@ class DailySummaryView(APIView):
                     'email_enabled': bool(email_notifier.enabled),
                     'recipients_configured': len(email_notifier.to_emails),
                     'portfolio_value': account['portfolio_value'],
+                    'operations_today': operations_summary.get('today', {}),
                 },
             )
 
@@ -2420,6 +2640,7 @@ class DailySummaryView(APIView):
                 'daily_change_pct': daily_change_pct,
                 'trades_today': len(trades_today),
                 'positions': len(positions),
+                'operations_today': operations_summary.get('today', {}),
             })
 
         except Exception as e:
