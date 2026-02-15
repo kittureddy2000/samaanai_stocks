@@ -1325,22 +1325,6 @@ function App() {
     }
   }, []);
 
-  const handleRunAnalyzeNow = useCallback(async () => {
-    setAnalyzeRunState({ running: true, error: '', result: null });
-    try {
-      const result = await runAnalyzeNow();
-      setAnalyzeRunState({ running: false, error: '', result });
-      await fetchOperationsData();
-      await fetchData();
-    } catch (error) {
-      setAnalyzeRunState({
-        running: false,
-        error: error.response?.data?.message || error.response?.data?.error || 'Failed to run analyze now',
-        result: null,
-      });
-    }
-  }, [fetchData, fetchOperationsData]);
-
   const fetchData = useCallback(async () => {
     try {
       const results = await Promise.allSettled([
@@ -1404,6 +1388,22 @@ function App() {
       setLoading(false);
     }
   }, []);
+
+  const handleRunAnalyzeNow = useCallback(async () => {
+    setAnalyzeRunState({ running: true, error: '', result: null });
+    try {
+      const result = await runAnalyzeNow();
+      setAnalyzeRunState({ running: false, error: '', result });
+      await fetchOperationsData();
+      await fetchData();
+    } catch (error) {
+      setAnalyzeRunState({
+        running: false,
+        error: error.response?.data?.message || error.response?.data?.error || 'Failed to run analyze now',
+        result: null,
+      });
+    }
+  }, [fetchData, fetchOperationsData]);
 
   useEffect(() => {
     fetchData();
