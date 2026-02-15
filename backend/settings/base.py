@@ -135,7 +135,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
-        'rest_framework.authentication.SessionAuthentication',
+        # SessionAuthentication removed - JWT only (no CSRF tokens needed for SPA)
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
@@ -155,6 +155,9 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
+
+# Frontend URL (for redirects after logout, etc.)
+FRONTEND_URL = os.environ.get('FRONTEND_URL', 'https://trading.samaanai.com')
 
 # CORS Settings
 CORS_ALLOWED_ORIGINS = [

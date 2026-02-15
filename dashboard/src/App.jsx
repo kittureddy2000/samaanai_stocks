@@ -1305,8 +1305,13 @@ function App() {
       setConfig(updated);
       setSettingsSaveState({ saving: false, error: '', success: 'Settings saved and applied.' });
     } catch (error) {
-      const message = error.response?.data?.error
-        || Object.values(error.response?.data?.errors || {})[0]
+      const responseData = error.response?.data || {};
+      const firstFieldError = Object.values(responseData.errors || {})[0];
+      const message = responseData.error
+        || responseData.detail
+        || (Array.isArray(firstFieldError) ? firstFieldError[0] : firstFieldError)
+        || responseData.message
+        || (error.response?.status === 403 ? 'Not authorized to save settings. Please sign out and sign in again.' : '')
         || 'Failed to save settings';
       setSettingsSaveState({ saving: false, error: message, success: '' });
     }
