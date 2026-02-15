@@ -1285,6 +1285,15 @@ function App() {
     checkAuth();
   }, [checkAuth]);
 
+  useEffect(() => {
+    const onAuthLogout = () => {
+      setUser(null);
+      setAuthChecked(true);
+    };
+    window.addEventListener('auth:logout', onAuthLogout);
+    return () => window.removeEventListener('auth:logout', onAuthLogout);
+  }, []);
+
   const handleLogout = useCallback(async () => {
     await logout();
     setUser(null);
@@ -1311,6 +1320,7 @@ function App() {
         || responseData.detail
         || (Array.isArray(firstFieldError) ? firstFieldError[0] : firstFieldError)
         || responseData.message
+        || (error.response?.status === 401 ? 'Session expired. Please sign in again.' : '')
         || (error.response?.status === 403 ? 'Not authorized to save settings. Please sign out and sign in again.' : '')
         || 'Failed to save settings';
       setSettingsSaveState({ saving: false, error: message, success: '' });

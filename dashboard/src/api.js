@@ -15,6 +15,12 @@ export const clearTokens = () => {
     localStorage.removeItem('refresh_token');
 };
 
+const emitAuthLogout = () => {
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('auth:logout'));
+    }
+};
+
 const api = axios.create({
     baseURL: API_BASE,
     timeout: 30000,
@@ -33,13 +39,46 @@ api.interceptors.request.use((config) => {
 // Handle 401 responses - clear tokens so user can re-login
 api.interceptors.response.use(
     (response) => response,
-    (error) => {
-        if (error.response?.status === 401) {
-            // Don't clear tokens on auth/me endpoint - that's expected when not logged in
-            if (!error.config?.url?.includes('/auth/me')) {
-                clearTokens();
+    async (error) => {
+        const originalRequest = error.config || {};
+        const status = error.response?.status;
+        const requestUrl = originalRequest.url || '';
+        const isAuthRoute = (
+            requestUrl.includes('/auth/login')
+            || requestUrl.includes('/auth/register')
+            || requestUrl.includes('/auth/token/refresh')
+            || requestUrl.includes('/auth/me')
+        );
+
+        if (status === 401 && !originalRequest._retry && !isAuthRoute) {
+            const refresh = getRefreshToken();
+            if (refresh) {
+                originalRequest._retry = true;
+                try {
+                    const refreshResponse = await axios.post(
+                        `${API_BASE}/auth/token/refresh`,
+                        { refresh },
+                        { withCredentials: true, timeout: 30000 }
+                    );
+                    const newAccess = refreshResponse.data?.access;
+                    const newRefresh = refreshResponse.data?.refresh || refresh;
+                    if (newAccess) {
+                        setTokens(newAccess, newRefresh);
+                        originalRequest.headers = originalRequest.headers || {};
+                        originalRequest.headers.Authorization = `Bearer ${newAccess}`;
+                        return api(originalRequest);
+                    }
+                } catch (refreshError) {
+                    console.warn('Token refresh failed, clearing session.', refreshError);
+                }
             }
+
+            clearTokens();
+            emitAuthLogout();
+        } else if (status === 401 && requestUrl.includes('/auth/me')) {
+            clearTokens();
         }
+
         return Promise.reject(error);
     }
 );
@@ -59,11 +98,19 @@ export const getCurrentUser = async () => {
 
 export const register = async (email, password, name) => {
     const response = await api.post('/auth/register', { email, password, name });
+    const tokens = response.data?.tokens;
+    if (tokens?.access) {
+        setTokens(tokens.access, tokens.refresh);
+    }
     return response.data;
 };
 
 export const login = async (email, password) => {
     const response = await api.post('/auth/login', { email, password });
+    const tokens = response.data?.tokens;
+    if (tokens?.access) {
+        setTokens(tokens.access, tokens.refresh);
+    }
     return response.data;
 };
 
