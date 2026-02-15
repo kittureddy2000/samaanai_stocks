@@ -118,6 +118,11 @@ export const getConfig = async () => {
     return response.data;
 };
 
+export const updateConfig = async (payload) => {
+    const response = await api.post('/api/config', payload);
+    return response.data;
+};
+
 export const getIndicators = async () => {
     const response = await api.get('/api/indicators');
     return response.data;

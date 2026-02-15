@@ -24,7 +24,7 @@ class TechnicalIndicators:
         # Normalize column names to lowercase for consistency
         self.df.columns = [c.lower() for c in self.df.columns]
         
-    def calculate_all(self) -> Dict[str, Any]:
+    def calculate_all(self, enabled_indicators: Optional[Dict[str, bool]] = None) -> Dict[str, Any]:
         """Calculate all technical indicators.
         
         Returns:
@@ -36,46 +36,59 @@ class TechnicalIndicators:
         
         indicators = {}
         
+        enabled = enabled_indicators or {}
+
+        def is_enabled(key: str) -> bool:
+            return enabled.get(key, True)
+
         # RSI
-        rsi = self.calculate_rsi()
-        if rsi is not None:
-            indicators['rsi'] = rsi
-            indicators['rsi_signal'] = self._interpret_rsi(rsi)
+        if is_enabled('rsi'):
+            rsi = self.calculate_rsi()
+            if rsi is not None:
+                indicators['rsi'] = rsi
+                indicators['rsi_signal'] = self._interpret_rsi(rsi)
         
         # MACD
-        macd_data = self.calculate_macd()
-        if macd_data:
-            indicators.update(macd_data)
+        if is_enabled('macd'):
+            macd_data = self.calculate_macd()
+            if macd_data:
+                indicators.update(macd_data)
         
         # Moving Averages
-        ma_data = self.calculate_moving_averages()
-        if ma_data:
-            indicators.update(ma_data)
+        if is_enabled('moving_averages'):
+            ma_data = self.calculate_moving_averages()
+            if ma_data:
+                indicators.update(ma_data)
         
         # Bollinger Bands
-        bb_data = self.calculate_bollinger_bands()
-        if bb_data:
-            indicators.update(bb_data)
+        if is_enabled('bollinger_bands'):
+            bb_data = self.calculate_bollinger_bands()
+            if bb_data:
+                indicators.update(bb_data)
         
         # Volume analysis
-        vol_data = self.calculate_volume_analysis()
-        if vol_data:
-            indicators.update(vol_data)
+        if is_enabled('volume'):
+            vol_data = self.calculate_volume_analysis()
+            if vol_data:
+                indicators.update(vol_data)
         
         # Price changes
-        price_data = self.calculate_price_changes()
-        if price_data:
-            indicators.update(price_data)
+        if is_enabled('price_action'):
+            price_data = self.calculate_price_changes()
+            if price_data:
+                indicators.update(price_data)
         
         # VWAP
-        vwap_data = self.calculate_vwap()
-        if vwap_data:
-            indicators.update(vwap_data)
+        if is_enabled('vwap'):
+            vwap_data = self.calculate_vwap()
+            if vwap_data:
+                indicators.update(vwap_data)
         
         # ATR
-        atr_data = self.calculate_atr()
-        if atr_data:
-            indicators.update(atr_data)
+        if is_enabled('atr'):
+            atr_data = self.calculate_atr()
+            if atr_data:
+                indicators.update(atr_data)
         
         return indicators
     

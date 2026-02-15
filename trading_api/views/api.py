@@ -8,6 +8,7 @@ import logging
 import time
 import threading
 from datetime import timedelta
+from typing import Dict
 from django.conf import settings
 from django.utils import timezone
 from rest_framework.views import APIView
@@ -24,6 +25,18 @@ _indicators_cache = {
     'results': [],
 }
 _indicators_cache_lock = threading.Lock()
+
+INDICATOR_LABELS = {
+    'rsi': 'RSI',
+    'macd': 'MACD',
+    'moving_averages': 'Moving Averages',
+    'bollinger_bands': 'Bollinger Bands',
+    'volume': 'Volume',
+    'price_action': 'Price Action',
+    'vwap': 'VWAP',
+    'atr': 'ATR',
+}
+DEFAULT_INDICATOR_SETTINGS = {key: True for key in INDICATOR_LABELS}
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +131,68 @@ def get_data_aggregator():
     from trading_api.services import get_data_aggregator as _get_da
     DataAggregator = _get_da()
     return DataAggregator()
+
+
+def _normalize_indicator_settings(raw_settings) -> Dict[str, bool]:
+    """Normalize indicator toggle payload to known keys."""
+    normalized = dict(DEFAULT_INDICATOR_SETTINGS)
+    if not isinstance(raw_settings, dict):
+        return normalized
+    for key in DEFAULT_INDICATOR_SETTINGS:
+        if key in raw_settings:
+            normalized[key] = bool(raw_settings[key])
+    return normalized
+
+
+def _effective_agent_settings():
+    """Build effective runtime settings from defaults plus DB overrides."""
+    trading_config = settings.TRADING_CONFIG
+    effective = {
+        'analysis_interval': int(trading_config['ANALYSIS_INTERVAL_MINUTES']),
+        'max_position_pct': float(trading_config['MAX_POSITION_PCT']) * 100,
+        'max_daily_loss_pct': float(trading_config['MAX_DAILY_LOSS_PCT']) * 100,
+        'min_confidence': float(trading_config['MIN_CONFIDENCE']) * 100,
+        'stop_loss_pct': float(trading_config['STOP_LOSS_PCT']) * 100,
+        'take_profit_pct': float(trading_config['TAKE_PROFIT_PCT']) * 100,
+        'indicator_settings': dict(DEFAULT_INDICATOR_SETTINGS),
+    }
+
+    try:
+        from trading_api.models import AgentSettings
+        persisted = AgentSettings.objects.filter(singleton_key='default').first()
+        if persisted:
+            effective.update({
+                'analysis_interval': int(persisted.analysis_interval_minutes),
+                'max_position_pct': float(persisted.max_position_pct) * 100,
+                'max_daily_loss_pct': float(persisted.max_daily_loss_pct) * 100,
+                'min_confidence': float(persisted.min_confidence) * 100,
+                'stop_loss_pct': float(persisted.stop_loss_pct) * 100,
+                'take_profit_pct': float(persisted.take_profit_pct) * 100,
+                'indicator_settings': _normalize_indicator_settings(persisted.indicator_settings),
+            })
+    except Exception as exc:
+        logger.warning(f"Agent settings unavailable, using defaults: {exc}")
+
+    return effective
+
+
+def apply_runtime_trading_settings():
+    """Apply effective settings into src.config runtime object."""
+    effective = _effective_agent_settings()
+    try:
+        from src.config import config as runtime_config
+        runtime_config.trading.analysis_interval_minutes = int(effective['analysis_interval'])
+        runtime_config.trading.max_position_pct = float(effective['max_position_pct']) / 100.0
+        runtime_config.trading.max_daily_loss_pct = float(effective['max_daily_loss_pct']) / 100.0
+        runtime_config.trading.min_confidence = float(effective['min_confidence']) / 100.0
+        runtime_config.trading.default_stop_loss_pct = float(effective['stop_loss_pct']) / 100.0
+        runtime_config.trading.default_take_profit_pct = float(effective['take_profit_pct']) / 100.0
+        runtime_config.trading.enabled_indicators = _normalize_indicator_settings(
+            effective.get('indicator_settings')
+        )
+    except Exception as exc:
+        logger.warning(f"Failed to apply runtime trading settings: {exc}")
+    return effective
 
 
 # ---------------------------------------------------------------------------
@@ -623,6 +698,7 @@ class RiskView(APIView):
         logger.info("RiskView.get called")
         try:
             trading_client = get_trading_client()
+            apply_runtime_trading_settings()
             risk_manager = get_risk_manager()
 
             account = trading_client.get_account()
@@ -1096,15 +1172,11 @@ class ConfigView(APIView):
 
     permission_classes = [IsAuthenticated]
 
-    def get(self, request):
-        start_time = time.time()
-        logger.info("ConfigView.get called")
-
-        trading_config = settings.TRADING_CONFIG
-
-        # Test TCP connection to IBKR
+    @staticmethod
+    def _test_ibkr_connection():
         import socket
         import os
+
         host = os.environ.get('IBKR_GATEWAY_HOST', '10.138.0.3')
         port = int(os.environ.get('IBKR_GATEWAY_PORT', '4002'))
 
@@ -1118,17 +1190,17 @@ class ConfigView(APIView):
         finally:
             sock.close()
 
-        # Debug info for broker selection
+        return host, port, api_conn
+
+    @staticmethod
+    def _build_response_payload(effective_settings, host, port, api_conn):
+        import os
+
+        trading_config = settings.TRADING_CONFIG
         broker_type_env = os.environ.get('BROKER_TYPE', 'unknown')
         broker_name = get_broker_info()
 
-        elapsed = time.time() - start_time
-        logger.info(
-            f"ConfigView.get completed in {elapsed:.2f}s: "
-            f"broker={broker_name}, tcp={api_conn}"
-        )
-
-        return Response({
+        return {
             'broker': broker_name,
             'debug_broker_type_env': broker_type_env,
             'debug_broker_name_computed': broker_name,
@@ -1136,19 +1208,120 @@ class ConfigView(APIView):
             'ibkr_host': host,
             'ibkr_port': port,
             'watchlist': trading_config['WATCHLIST'],
-            'analysis_interval': trading_config['ANALYSIS_INTERVAL_MINUTES'],
-            'max_position_pct': trading_config['MAX_POSITION_PCT'] * 100,
-            'max_daily_loss_pct': trading_config['MAX_DAILY_LOSS_PCT'] * 100,
-            'min_confidence': trading_config['MIN_CONFIDENCE'] * 100,
-            'stop_loss_pct': trading_config['STOP_LOSS_PCT'] * 100,
-            'take_profit_pct': trading_config['TAKE_PROFIT_PCT'] * 100,
+            'analysis_interval': effective_settings['analysis_interval'],
+            'max_position_pct': effective_settings['max_position_pct'],
+            'max_daily_loss_pct': effective_settings['max_daily_loss_pct'],
+            'min_confidence': effective_settings['min_confidence'],
+            'stop_loss_pct': effective_settings['stop_loss_pct'],
+            'take_profit_pct': effective_settings['take_profit_pct'],
+            'indicator_settings': _normalize_indicator_settings(
+                effective_settings.get('indicator_settings')
+            ),
+            'available_indicators': [
+                {'key': key, 'label': label}
+                for key, label in INDICATOR_LABELS.items()
+            ],
             'initial_capital': float(
                 os.environ.get(
                     'INITIAL_CAPITAL',
                     trading_config.get('INITIAL_CAPITAL', 1000000)
                 )
             ),
-        })
+        }
+
+    def get(self, request):
+        start_time = time.time()
+        logger.info("ConfigView.get called")
+
+        effective_settings = apply_runtime_trading_settings()
+        host, port, api_conn = self._test_ibkr_connection()
+        payload = self._build_response_payload(effective_settings, host, port, api_conn)
+
+        elapsed = time.time() - start_time
+        logger.info(
+            f"ConfigView.get completed in {elapsed:.2f}s: "
+            f"broker={payload['broker']}, tcp={api_conn}"
+        )
+        return Response(payload)
+
+    def post(self, request):
+        start_time = time.time()
+        logger.info("ConfigView.post called")
+
+        data = request.data or {}
+        errors = {}
+        updates = {}
+
+        def parse_pct(field, min_value=0, max_value=100):
+            if field not in data:
+                return
+            try:
+                value = float(data.get(field))
+                if value < min_value or value > max_value:
+                    errors[field] = f"Must be between {min_value} and {max_value}"
+                else:
+                    updates[field] = value
+            except (TypeError, ValueError):
+                errors[field] = "Must be a number"
+
+        if 'analysis_interval' in data:
+            try:
+                interval = int(data.get('analysis_interval'))
+                if interval < 1 or interval > 1440:
+                    errors['analysis_interval'] = "Must be between 1 and 1440 minutes"
+                else:
+                    updates['analysis_interval'] = interval
+            except (TypeError, ValueError):
+                errors['analysis_interval'] = "Must be an integer"
+
+        parse_pct('max_position_pct', 0.1, 100)
+        parse_pct('max_daily_loss_pct', 0.1, 100)
+        parse_pct('min_confidence', 0, 100)
+        parse_pct('stop_loss_pct', 0.1, 100)
+        parse_pct('take_profit_pct', 0.1, 500)
+
+        if 'indicator_settings' in data:
+            if not isinstance(data.get('indicator_settings'), dict):
+                errors['indicator_settings'] = "Must be a key/value object"
+            else:
+                updates['indicator_settings'] = _normalize_indicator_settings(
+                    data.get('indicator_settings')
+                )
+
+        if errors:
+            return Response({'success': False, 'errors': errors}, status=400)
+
+        if not updates:
+            return Response({'success': False, 'error': 'No fields provided to update'}, status=400)
+
+        from trading_api.models import AgentSettings
+        settings_obj, _ = AgentSettings.objects.get_or_create(singleton_key='default')
+
+        if 'analysis_interval' in updates:
+            settings_obj.analysis_interval_minutes = updates['analysis_interval']
+        if 'max_position_pct' in updates:
+            settings_obj.max_position_pct = updates['max_position_pct'] / 100.0
+        if 'max_daily_loss_pct' in updates:
+            settings_obj.max_daily_loss_pct = updates['max_daily_loss_pct'] / 100.0
+        if 'min_confidence' in updates:
+            settings_obj.min_confidence = updates['min_confidence'] / 100.0
+        if 'stop_loss_pct' in updates:
+            settings_obj.stop_loss_pct = updates['stop_loss_pct'] / 100.0
+        if 'take_profit_pct' in updates:
+            settings_obj.take_profit_pct = updates['take_profit_pct'] / 100.0
+        if 'indicator_settings' in updates:
+            settings_obj.indicator_settings = updates['indicator_settings']
+
+        settings_obj.save()
+        effective_settings = apply_runtime_trading_settings()
+        host, port, api_conn = self._test_ibkr_connection()
+        payload = self._build_response_payload(effective_settings, host, port, api_conn)
+        payload['success'] = True
+        payload['message'] = "Settings updated"
+
+        elapsed = time.time() - start_time
+        logger.info(f"ConfigView.post completed in {elapsed:.2f}s")
+        return Response(payload)
 
 
 class IndicatorsView(APIView):
@@ -1160,6 +1333,10 @@ class IndicatorsView(APIView):
         start_time = time.time()
         logger.info("IndicatorsView.get called")
         try:
+            effective_settings = apply_runtime_trading_settings()
+            enabled_indicators = _normalize_indicator_settings(
+                effective_settings.get('indicator_settings')
+            )
             import math
             import pandas as pd
             import yfinance as yf
@@ -1231,7 +1408,7 @@ class IndicatorsView(APIView):
                         })
                         continue
 
-                    tech_data = TechnicalIndicators(df).calculate_all()
+                    tech_data = TechnicalIndicators(df).calculate_all(enabled_indicators)
                     close_series = df['Close'] if 'Close' in df.columns else df.iloc[:, 0]
                     current_price = _safe_float(close_series.ffill().iloc[-1]) or 0
 
@@ -1239,7 +1416,9 @@ class IndicatorsView(APIView):
                     macd = _safe_float(tech_data.get('macd'))
                     macd_trend = str(tech_data.get('macd_signal') or 'NEUTRAL').upper()
 
-                    if rsi is None:
+                    if not enabled_indicators.get('rsi', True):
+                        rsi_signal = 'DISABLED'
+                    elif rsi is None:
                         rsi_signal = 'NO DATA'
                     elif rsi > 70:
                         rsi_signal = 'OVERBOUGHT'
@@ -1252,10 +1431,23 @@ class IndicatorsView(APIView):
                     else:
                         rsi_signal = 'NEUTRAL'
 
+                    if not enabled_indicators.get('macd', True):
+                        macd_trend = 'DISABLED'
+
                     overall = 'NEUTRAL'
-                    if rsi_signal in ('OVERSOLD', 'BULLISH') or macd_trend == 'BULLISH':
+                    bullish_votes = 0
+                    bearish_votes = 0
+                    if rsi_signal in ('OVERSOLD', 'BULLISH'):
+                        bullish_votes += 1
+                    elif rsi_signal in ('OVERBOUGHT', 'BEARISH'):
+                        bearish_votes += 1
+                    if macd_trend == 'BULLISH':
+                        bullish_votes += 1
+                    elif macd_trend == 'BEARISH':
+                        bearish_votes += 1
+                    if bullish_votes > bearish_votes:
                         overall = 'BULLISH'
-                    elif rsi_signal in ('OVERBOUGHT', 'BEARISH') or macd_trend == 'BEARISH':
+                    elif bearish_votes > bullish_votes:
                         overall = 'BEARISH'
 
                     results.append({
@@ -1947,6 +2139,40 @@ class AnalyzeView(APIView):
             _, notify_trade = get_slack()
 
             trading_client = get_trading_client()
+            effective_settings = apply_runtime_trading_settings()
+
+            # Respect configured analysis interval even if scheduler triggers more frequently.
+            from trading_api.models.trade import AgentRunLog
+            analysis_interval_minutes = int(effective_settings.get('analysis_interval', 15))
+            last_analyze_run = AgentRunLog.objects.filter(
+                run_type='analyze'
+            ).order_by('-created_at').first()
+            if last_analyze_run:
+                elapsed_since_last = timezone.now() - last_analyze_run.created_at
+                min_interval = timedelta(minutes=analysis_interval_minutes)
+                if elapsed_since_last < min_interval:
+                    remaining_seconds = int((min_interval - elapsed_since_last).total_seconds())
+                    message = (
+                        f"Analyze interval not reached; "
+                        f"next run in ~{remaining_seconds}s"
+                    )
+                    logger.info(f"AnalyzeView: {message}")
+                    record_agent_run(
+                        run_type='analyze',
+                        status='skipped',
+                        start_time=start_time,
+                        message=message,
+                        market_open=trading_client.is_market_open(),
+                        llm_ok=None,
+                        trades_recommended=0,
+                        trades_executed=0,
+                    )
+                    return Response({
+                        'status': 'skipped',
+                        'message': message,
+                        'analysis_interval_minutes': analysis_interval_minutes,
+                        'next_run_in_seconds': remaining_seconds,
+                    })
 
             # Check if market is open
             if not trading_client.is_market_open():
@@ -1998,7 +2224,10 @@ class AnalyzeView(APIView):
                 return Response({'status': 'no_response', 'message': 'No LLM response'})
 
             # Filter and execute trades
-            valid_trades = analyst.filter_by_confidence(response.trades)
+            valid_trades = analyst.filter_by_confidence(
+                response.trades,
+                min_confidence=float(effective_settings['min_confidence']) / 100.0
+            )
 
             if not valid_trades:
                 elapsed = time.time() - start_time
@@ -2091,6 +2320,7 @@ class DailySummaryView(APIView):
             from trading_api.services import get_slack
 
             trading_client = get_trading_client()
+            apply_runtime_trading_settings()
             risk_manager = get_risk_manager()
 
             # Get portfolio data

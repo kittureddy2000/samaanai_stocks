@@ -205,8 +205,8 @@ class AgentRunLog(models.Model):
         db_table = 'agent_run_logs'
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['run_type', 'created_at']),
-            models.Index(fields=['status', 'created_at']),
+            models.Index(fields=['run_type', 'created_at'], name='agent_run_l_run_typ_50509b_idx'),
+            models.Index(fields=['status', 'created_at'], name='agent_run_l_status_804c45_idx'),
         ]
 
     def __str__(self):

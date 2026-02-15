@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 from pydantic import BaseModel
-from typing import List
+from typing import Dict, List
 
 # Load environment variables
 load_dotenv()
@@ -87,6 +87,18 @@ class TradingConfig(BaseModel):
     # Stop loss / take profit (as percentage) - configurable via env vars
     default_stop_loss_pct: float = float(os.getenv("STOP_LOSS_PCT", "0.05"))  # 5% stop loss
     default_take_profit_pct: float = float(os.getenv("TAKE_PROFIT_PCT", "0.10"))  # 10% take profit
+
+    # Indicator toggles used when building LLM context
+    enabled_indicators: Dict[str, bool] = {
+        "rsi": True,
+        "macd": True,
+        "moving_averages": True,
+        "bollinger_bands": True,
+        "volume": True,
+        "price_action": True,
+        "vwap": True,
+        "atr": True,
+    }
 
     # Market hours (Eastern Time)
     market_open_hour: int = 9

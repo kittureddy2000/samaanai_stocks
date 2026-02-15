@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { getPortfolio, getRisk, getMarket, getWatchlist, getTrades, getAgentStatus, getConfig, getIndicators, getCurrentUser, getLoginUrl, register, login, logout, getOptionChain, getCollarStrategy, addToWatchlist, removeFromWatchlist, setTokens } from './api';
+import { getPortfolio, getRisk, getMarket, getWatchlist, getTrades, getAgentStatus, getConfig, updateConfig, getCurrentUser, getLoginUrl, register, login, logout, getOptionChain, getCollarStrategy, addToWatchlist, removeFromWatchlist, setTokens } from './api';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import './App.css';
 
@@ -695,6 +695,184 @@ function CollarStrategyPage() {
 
 
 // ============================================================
+// Settings Page Component
+// ============================================================
+function SettingsPage({ config, onSave, saveState }) {
+  const [formData, setFormData] = useState({
+    analysis_interval: 15,
+    max_position_pct: 10,
+    max_daily_loss_pct: 3,
+    min_confidence: 70,
+    stop_loss_pct: 5,
+    take_profit_pct: 10,
+  });
+  const [indicatorSettings, setIndicatorSettings] = useState({});
+
+  useEffect(() => {
+    if (!config) return;
+    setFormData({
+      analysis_interval: config.analysis_interval ?? 15,
+      max_position_pct: config.max_position_pct ?? 10,
+      max_daily_loss_pct: config.max_daily_loss_pct ?? 3,
+      min_confidence: config.min_confidence ?? 70,
+      stop_loss_pct: config.stop_loss_pct ?? 5,
+      take_profit_pct: config.take_profit_pct ?? 10,
+    });
+    setIndicatorSettings(config.indicator_settings || {});
+  }, [config]);
+
+  const indicatorCatalog = config?.available_indicators || [
+    { key: 'rsi', label: 'RSI' },
+    { key: 'macd', label: 'MACD' },
+    { key: 'moving_averages', label: 'Moving Averages' },
+    { key: 'bollinger_bands', label: 'Bollinger Bands' },
+    { key: 'volume', label: 'Volume' },
+    { key: 'price_action', label: 'Price Action' },
+    { key: 'vwap', label: 'VWAP' },
+    { key: 'atr', label: 'ATR' },
+  ];
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    await onSave({
+      ...formData,
+      indicator_settings: indicatorSettings,
+    });
+  };
+
+  const updateField = (field, value) => {
+    const n = Number(value);
+    setFormData((prev) => ({
+      ...prev,
+      [field]: Number.isFinite(n) ? n : value,
+    }));
+  };
+
+  const toggleIndicator = (key) => {
+    setIndicatorSettings((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
+
+  return (
+    <div className="settings-page">
+      <div className="settings-header">
+        <div className="dash-label">SETTINGS</div>
+        <h2 className="dash-title">Agent Configuration</h2>
+        <p className="dash-subtitle">
+          Update runtime controls and technical indicator usage for LLM analysis.
+        </p>
+      </div>
+
+      <form className="settings-grid" onSubmit={handleSubmit}>
+        <div className="card settings-card">
+          <div className="card-label">TRADING CONTROLS</div>
+          <h3>Agent Parameters</h3>
+          <div className="settings-form-grid">
+            <label>
+              Analysis Interval (min)
+              <input
+                type="number"
+                min="1"
+                max="1440"
+                value={formData.analysis_interval}
+                onChange={(e) => updateField('analysis_interval', e.target.value)}
+              />
+            </label>
+            <label>
+              Max Position %
+              <input
+                type="number"
+                min="0.1"
+                max="100"
+                step="0.1"
+                value={formData.max_position_pct}
+                onChange={(e) => updateField('max_position_pct', e.target.value)}
+              />
+            </label>
+            <label>
+              Max Daily Loss %
+              <input
+                type="number"
+                min="0.1"
+                max="100"
+                step="0.1"
+                value={formData.max_daily_loss_pct}
+                onChange={(e) => updateField('max_daily_loss_pct', e.target.value)}
+              />
+            </label>
+            <label>
+              Min Confidence %
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                value={formData.min_confidence}
+                onChange={(e) => updateField('min_confidence', e.target.value)}
+              />
+            </label>
+            <label>
+              Stop Loss %
+              <input
+                type="number"
+                min="0.1"
+                max="100"
+                step="0.1"
+                value={formData.stop_loss_pct}
+                onChange={(e) => updateField('stop_loss_pct', e.target.value)}
+              />
+            </label>
+            <label>
+              Take Profit %
+              <input
+                type="number"
+                min="0.1"
+                max="500"
+                step="0.1"
+                value={formData.take_profit_pct}
+                onChange={(e) => updateField('take_profit_pct', e.target.value)}
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="card settings-card">
+          <div className="card-label">TECHNICAL INDICATORS</div>
+          <h3>Enable / Disable Signals</h3>
+          <div className="settings-indicator-list">
+            {indicatorCatalog.map((indicator) => {
+              const enabled = Boolean(indicatorSettings[indicator.key]);
+              return (
+                <button
+                  type="button"
+                  key={indicator.key}
+                  className={`indicator-toggle ${enabled ? 'enabled' : 'disabled'}`}
+                  onClick={() => toggleIndicator(indicator.key)}
+                >
+                  <span>{indicator.label}</span>
+                  <span className="indicator-toggle-state">{enabled ? 'ON' : 'OFF'}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="settings-actions">
+          <button type="submit" className="btn-refresh" disabled={saveState.saving}>
+            {saveState.saving ? 'Saving...' : 'Save Settings'}
+          </button>
+          {saveState.error && <span className="settings-error">{saveState.error}</span>}
+          {saveState.success && <span className="settings-success">{saveState.success}</span>}
+        </div>
+      </form>
+    </div>
+  );
+}
+
+
+// ============================================================
 // Auth Page Component
 // ============================================================
 function AuthPage({ onAuthSuccess }) {
@@ -831,7 +1009,6 @@ function App() {
   const [trades, setTrades] = useState([]);
   const [agentStatus, setAgentStatus] = useState(null);
   const [config, setConfig] = useState(null);
-  const [indicators, setIndicators] = useState([]);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [loading, setLoading] = useState(true);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -839,6 +1016,11 @@ function App() {
   const [newWatchlistSymbol, setNewWatchlistSymbol] = useState('');
   const [watchlistError, setWatchlistError] = useState('');
   const [watchlistLoading, setWatchlistLoading] = useState(false);
+  const [settingsSaveState, setSettingsSaveState] = useState({
+    saving: false,
+    error: '',
+    success: '',
+  });
   const profileRef = useRef(null);
 
   // Handle OAuth callback - extract tokens from URL on app load
@@ -943,6 +1125,20 @@ function App() {
     setProfileSubmenu((prev) => (prev === menuKey ? null : menuKey));
   }, []);
 
+  const handleSaveSettings = useCallback(async (payload) => {
+    setSettingsSaveState({ saving: true, error: '', success: '' });
+    try {
+      const updated = await updateConfig(payload);
+      setConfig(updated);
+      setSettingsSaveState({ saving: false, error: '', success: 'Settings saved and applied.' });
+    } catch (error) {
+      const message = error.response?.data?.error
+        || Object.values(error.response?.data?.errors || {})[0]
+        || 'Failed to save settings';
+      setSettingsSaveState({ saving: false, error: message, success: '' });
+    }
+  }, []);
+
   const fetchData = useCallback(async () => {
     try {
       const results = await Promise.allSettled([
@@ -1001,13 +1197,6 @@ function App() {
 
       setLastUpdated(new Date().toLocaleTimeString());
       setLoading(false);
-
-      try {
-        const indicatorsData = await getIndicators();
-        setIndicators(indicatorsData.indicators || []);
-      } catch (e) {
-        console.error('Failed to fetch indicators:', e);
-      }
     } catch (error) {
       console.error('Failed to fetch data:', error);
       setLoading(false);
@@ -1053,8 +1242,6 @@ function App() {
   const fallbackOverallPct = positionCostBasis > 0 ? (positionUnrealizedPL / positionCostBasis) * 100 : 0;
   const overallChange = portfolio?.performance?.overall_change ?? positionUnrealizedPL;
   const overallChangePct = portfolio?.performance?.overall_change_pct ?? fallbackOverallPct;
-  const visibleIndicators = indicators.filter((ind) => ind?.overall_signal !== 'ERROR');
-  const indicatorFeedDown = indicators.length > 0 && visibleIndicators.length === 0;
   const lastAgentRun = agentStatus?.last_run;
   const lastTradeRun = agentStatus?.last_trade_run;
   const runsLast24h = agentStatus?.last_24h?.runs || 0;
@@ -1107,25 +1294,15 @@ function App() {
               <div className="profile-dropdown">
                 <div className="profile-menu">
                   <button
-                    className={`profile-submenu-trigger ${profileSubmenu === 'agent' ? 'open' : ''}`}
-                    onClick={() => toggleProfileSubmenu('agent')}
+                    className="profile-submenu-trigger"
+                    onClick={() => {
+                      setCurrentPage('settings');
+                      setProfileOpen(false);
+                      setProfileSubmenu(null);
+                    }}
                   >
-                    <span>Agent Configuration</span>
-                    <span className="submenu-chevron">&#x25BE;</span>
+                    <span>Settings</span>
                   </button>
-                  {profileSubmenu === 'agent' && (
-                    <div className="profile-submenu-content">
-                      <div className="config-grid">
-                        <div className="config-item"><span className="label">Analysis Interval</span><span className="value">{config?.analysis_interval || 30} min</span></div>
-                        <div className="config-item"><span className="label">Max Position %</span><span className="value">{config?.max_position_pct || 10}%</span></div>
-                        <div className="config-item"><span className="label">Max Daily Loss</span><span className="value">{config?.max_daily_loss_pct || 3}%</span></div>
-                        <div className="config-item"><span className="label">Min Confidence</span><span className="value">{config?.min_confidence || 70}%</span></div>
-                        <div className="config-item"><span className="label">Stop Loss</span><span className="value">{config?.stop_loss_pct || 5}%</span></div>
-                        <div className="config-item"><span className="label">Take Profit</span><span className="value">{config?.take_profit_pct || 10}%</span></div>
-                        <div className="config-item"><span className="label">Initial Capital</span><span className="value">{formatCurrency(config?.initial_capital || 1000000)}</span></div>
-                      </div>
-                    </div>
-                  )}
 
                   <button
                     className={`profile-submenu-trigger ${profileSubmenu === 'broker' ? 'open' : ''}`}
@@ -1167,52 +1344,6 @@ function App() {
                         </div>
                         <div className="profile-broker-note">Last analyze run: {agentLastRunText}</div>
                         <div className="profile-broker-note">Last trade execution: {lastTradeRunText}</div>
-                      </div>
-                    </div>
-                  )}
-
-                  <button
-                    className={`profile-submenu-trigger ${profileSubmenu === 'indicators' ? 'open' : ''}`}
-                    onClick={() => toggleProfileSubmenu('indicators')}
-                  >
-                    <span>Technical Indicators</span>
-                    <span className="submenu-chevron">&#x25BE;</span>
-                  </button>
-                  {profileSubmenu === 'indicators' && (
-                    <div className="profile-submenu-content">
-                      <div className="profile-indicators-scroll">
-                        <table className="profile-indicators-table">
-                          <thead>
-                            <tr><th>Symbol</th><th>Price</th><th>RSI</th><th>MACD</th><th>Signal</th></tr>
-                          </thead>
-                          <tbody>
-                            {indicators.length === 0 ? (
-                              <tr><td colSpan="5" className="empty-state">Loading indicators...</td></tr>
-                            ) : indicatorFeedDown ? (
-                              <tr><td colSpan="5" className="empty-state">Indicator data temporarily unavailable</td></tr>
-                            ) : (
-                              visibleIndicators.map((ind) => (
-                                <tr key={ind.symbol}>
-                                  <td className="symbol-highlight">{ind.symbol}</td>
-                                  <td>{ind.price ? formatCurrency(ind.price) : '--'}</td>
-                                  <td>
-                                    <span className={getSignalClass(ind.rsi_signal)}>{ind.rsi ? ind.rsi.toFixed(1) : '--'}</span>
-                                    <span className="signal-badge">{ind.rsi_signal || ''}</span>
-                                  </td>
-                                  <td>
-                                    <span className={getSignalClass(ind.macd_trend)}>{ind.macd ? ind.macd.toFixed(2) : '--'}</span>
-                                    <span className="signal-badge">{ind.macd_trend || ''}</span>
-                                  </td>
-                                  <td>
-                                    <span className={`overall-signal ${getSignalClass(ind.overall_signal)}`}>
-                                      {ind.overall_signal || 'NEUTRAL'}
-                                    </span>
-                                  </td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
                       </div>
                     </div>
                   )}
@@ -1490,6 +1621,13 @@ function App() {
             </div>
           </div>
         </>
+      )}
+      {currentPage === 'settings' && (
+        <SettingsPage
+          config={config}
+          onSave={handleSaveSettings}
+          saveState={settingsSaveState}
+        />
       )}
       {currentPage === 'options' && <OptionChainPage />}
       {currentPage === 'collar' && <CollarStrategyPage />}
