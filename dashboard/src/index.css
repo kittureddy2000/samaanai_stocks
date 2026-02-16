@@ -1260,6 +1260,20 @@ td {
   font-size: 13px;
 }
 
+.operations-table-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.operations-inline-error {
+  color: var(--accent-red);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
 .operations-stat-row {
   display: flex;
   align-items: center;

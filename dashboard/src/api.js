@@ -165,6 +165,36 @@ export const getOperationsSummary = async (days = 14) => {
     return response.data;
 };
 
+export const getAnalyzeLogs = async (days = 14, limit = 200, status = '') => {
+    const params = { days, limit };
+    if (status) params.status = status;
+    const response = await api.get('/api/analyze-logs', { params });
+    return response.data;
+};
+
+export const exportAnalyzeLogsCsv = async (days = 14, limit = 1000, status = '') => {
+    const params = { days, limit, format: 'csv' };
+    if (status) params.status = status;
+    const response = await api.get('/api/analyze-logs', {
+        params,
+        responseType: 'blob',
+    });
+
+    const contentDisposition = response.headers?.['content-disposition'] || '';
+    const match = contentDisposition.match(/filename="?([^"]+)"?/i);
+    const filename = match?.[1] || `analyze_logs_${new Date().toISOString().slice(0, 10)}.csv`;
+
+    const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+};
+
 export const runAnalyzeNow = async () => {
     const response = await api.post('/api/analyze', {});
     return response.data;

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { getPortfolio, getRisk, getMarket, getWatchlist, getTrades, getAgentStatus, getOperationsSummary, runAnalyzeNow, getConfig, updateConfig, getCurrentUser, getLoginUrl, register, login, logout, getOptionChain, getCollarStrategy, addToWatchlist, removeFromWatchlist, setTokens } from './api';
+import { getPortfolio, getRisk, getMarket, getWatchlist, getTrades, getAgentStatus, getOperationsSummary, getAnalyzeLogs, exportAnalyzeLogsCsv, runAnalyzeNow, getConfig, updateConfig, getCurrentUser, getLoginUrl, register, login, logout, getOptionChain, getCollarStrategy, addToWatchlist, removeFromWatchlist, setTokens } from './api';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import './App.css';
 
@@ -885,7 +885,19 @@ function SettingsPage({ config, onSave, saveState }) {
 // ============================================================
 // Operations Page Component
 // ============================================================
-function OperationsPage({ data, loading, error, onRefresh, onRunAnalyze, analyzeState }) {
+function OperationsPage({
+  data,
+  loading,
+  error,
+  onRefresh,
+  onRunAnalyze,
+  analyzeState,
+  analyzeLogs,
+  analyzeLogsLoading,
+  analyzeLogsError,
+  onExportAnalyzeLogs,
+  exportLogsState,
+}) {
   const checks = data?.checks || {};
   const ibkr = checks.ibkr || {};
   const gemini = checks.gemini || {};
@@ -1008,6 +1020,67 @@ function OperationsPage({ data, loading, error, onRefresh, onRunAnalyze, analyze
                   <td className={day.gemini_other_issues > 0 ? 'negative' : ''}>{day.gemini_other_issues}</td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card operations-table-card">
+        <div className="operations-table-header">
+          <div>
+            <div className="card-label">ANALYZE RUN LOGS</div>
+            <h2>Detailed Analyze Runs</h2>
+          </div>
+          <button
+            className="btn-refresh"
+            onClick={onExportAnalyzeLogs}
+            disabled={exportLogsState?.exporting}
+          >
+            {exportLogsState?.exporting ? 'Exporting...' : 'Export CSV'}
+          </button>
+        </div>
+        {exportLogsState?.error && <div className="operations-inline-error">{exportLogsState.error}</div>}
+        <div className="positions">
+          <table className="positions-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Status</th>
+                <th>Duration (ms)</th>
+                <th>Market Open</th>
+                <th>LLM OK</th>
+                <th>Reco</th>
+                <th>Exec</th>
+                <th>Issue</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody>
+              {analyzeLogsError ? (
+                <tr><td colSpan="9" className="empty-state negative">{analyzeLogsError}</td></tr>
+              ) : analyzeLogsLoading ? (
+                <tr><td colSpan="9" className="empty-state">Loading analyze logs...</td></tr>
+              ) : (analyzeLogs || []).length === 0 ? (
+                <tr><td colSpan="9" className="empty-state">No analyze logs found.</td></tr>
+              ) : (
+                (analyzeLogs || []).map((log) => (
+                  <tr key={log.id || log.time}>
+                    <td>{log.time ? new Date(log.time).toLocaleString() : '--'}</td>
+                    <td className={log.status === 'error' ? 'negative' : (log.status === 'success' ? 'positive' : '')}>
+                      {log.status || '--'}
+                    </td>
+                    <td>{log.duration_ms ?? '--'}</td>
+                    <td>{log.market_open == null ? '--' : (log.market_open ? 'Yes' : 'No')}</td>
+                    <td className={log.llm_ok === false ? 'negative' : (log.llm_ok === true ? 'positive' : '')}>
+                      {log.llm_ok == null ? '--' : (log.llm_ok ? 'Yes' : 'No')}
+                    </td>
+                    <td>{log.trades_recommended ?? 0}</td>
+                    <td>{log.trades_executed ?? 0}</td>
+                    <td>{log.issue_type || '--'}</td>
+                    <td>{log.message || '--'}</td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -1202,6 +1275,13 @@ function App() {
   const [operationsSummary, setOperationsSummary] = useState(null);
   const [operationsLoading, setOperationsLoading] = useState(false);
   const [operationsError, setOperationsError] = useState('');
+  const [analyzeLogs, setAnalyzeLogs] = useState([]);
+  const [analyzeLogsLoading, setAnalyzeLogsLoading] = useState(false);
+  const [analyzeLogsError, setAnalyzeLogsError] = useState('');
+  const [exportLogsState, setExportLogsState] = useState({
+    exporting: false,
+    error: '',
+  });
   const [analyzeRunState, setAnalyzeRunState] = useState({
     running: false,
     error: '',
@@ -1343,13 +1423,45 @@ function App() {
   const fetchOperationsData = useCallback(async () => {
     setOperationsLoading(true);
     setOperationsError('');
+    setAnalyzeLogsLoading(true);
+    setAnalyzeLogsError('');
+
+    const [summaryRes, logsRes] = await Promise.allSettled([
+      getOperationsSummary(14),
+      getAnalyzeLogs(14, 300),
+    ]);
+
+    if (summaryRes.status === 'fulfilled') {
+      setOperationsSummary(summaryRes.value);
+    } else {
+      setOperationsError(
+        summaryRes.reason?.response?.data?.error || 'Failed to load operations summary'
+      );
+    }
+
+    if (logsRes.status === 'fulfilled') {
+      setAnalyzeLogs(logsRes.value?.logs || []);
+    } else {
+      setAnalyzeLogs([]);
+      setAnalyzeLogsError(
+        logsRes.reason?.response?.data?.error || 'Failed to load analyze logs'
+      );
+    }
+
+    setOperationsLoading(false);
+    setAnalyzeLogsLoading(false);
+  }, []);
+
+  const handleExportAnalyzeLogs = useCallback(async () => {
+    setExportLogsState({ exporting: true, error: '' });
     try {
-      const summary = await getOperationsSummary(14);
-      setOperationsSummary(summary);
+      await exportAnalyzeLogsCsv(14, 2000);
+      setExportLogsState({ exporting: false, error: '' });
     } catch (error) {
-      setOperationsError(error.response?.data?.error || 'Failed to load operations summary');
-    } finally {
-      setOperationsLoading(false);
+      setExportLogsState({
+        exporting: false,
+        error: error.response?.data?.error || 'Failed to export analyze logs CSV',
+      });
     }
   }, []);
 
@@ -1892,6 +2004,11 @@ function App() {
           onRefresh={fetchOperationsData}
           onRunAnalyze={handleRunAnalyzeNow}
           analyzeState={analyzeRunState}
+          analyzeLogs={analyzeLogs}
+          analyzeLogsLoading={analyzeLogsLoading}
+          analyzeLogsError={analyzeLogsError}
+          onExportAnalyzeLogs={handleExportAnalyzeLogs}
+          exportLogsState={exportLogsState}
         />
       )}
     </div>

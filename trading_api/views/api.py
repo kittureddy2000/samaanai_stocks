@@ -8,9 +8,11 @@ import logging
 import os
 import time
 import threading
+import csv
 from datetime import timedelta
 from typing import Dict, List, Tuple
 from django.conf import settings
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -1556,6 +1558,137 @@ class OperationsSummaryView(APIView):
         except Exception as e:
             elapsed = time.time() - start_time
             logger.error(f"OperationsSummaryView.get failed in {elapsed:.2f}s: {e}")
+            return Response({'error': str(e)}, status=500)
+
+
+class AnalyzeLogsView(APIView):
+    """Detailed analyze-run logs for diagnostics and export."""
+
+    permission_classes = [IsAuthenticated]
+
+    @staticmethod
+    def _is_truthy(value):
+        return str(value).strip().lower() in ('1', 'true', 'yes', 'on')
+
+    @staticmethod
+    def _serialize_run(run, include_details=False):
+        issue_type = classify_operational_issue(run.message, run.llm_error)
+        payload = {
+            'id': run.id,
+            'time': timezone.localtime(run.created_at).isoformat(),
+            'status': run.status,
+            'message': run.message or '',
+            'duration_ms': run.duration_ms,
+            'market_open': run.market_open,
+            'llm_ok': run.llm_ok,
+            'llm_error': run.llm_error or '',
+            'trades_recommended': run.trades_recommended or 0,
+            'trades_executed': run.trades_executed or 0,
+            'issue_type': issue_type,
+            'symbol': run.symbol or '',
+            'option_type': run.option_type or '',
+            'strike': float(run.strike) if run.strike is not None else None,
+        }
+        if include_details:
+            payload['details'] = run.details or {}
+        return payload
+
+    def get(self, request):
+        start_time = time.time()
+        logger.info("AnalyzeLogsView.get called")
+        try:
+            from trading_api.models.trade import AgentRunLog
+
+            days = int(request.query_params.get('days', 14) or 14)
+            days = max(1, min(days, 365))
+
+            limit = int(request.query_params.get('limit', 200) or 200)
+            limit = max(1, min(limit, 2000))
+
+            include_details = self._is_truthy(request.query_params.get('include_details', '0'))
+            export_format = (request.query_params.get('format', 'json') or 'json').strip().lower()
+
+            valid_statuses = {choice[0] for choice in AgentRunLog.STATUS_CHOICES}
+            requested_statuses = [
+                s.strip().lower()
+                for s in str(request.query_params.get('status', '')).split(',')
+                if s.strip()
+            ]
+            selected_statuses = [s for s in requested_statuses if s in valid_statuses]
+
+            since = timezone.now() - timedelta(days=days)
+            queryset = AgentRunLog.objects.filter(
+                run_type='analyze',
+                created_at__gte=since
+            ).order_by('-created_at')
+
+            if selected_statuses:
+                queryset = queryset.filter(status__in=selected_statuses)
+
+            total = queryset.count()
+            runs = list(queryset[:limit])
+            rows = [self._serialize_run(run, include_details=include_details) for run in runs]
+
+            if export_format == 'csv':
+                stamp = timezone.localtime().strftime('%Y%m%d_%H%M%S')
+                response = HttpResponse(content_type='text/csv')
+                response['Content-Disposition'] = f'attachment; filename="analyze_logs_{stamp}.csv"'
+                writer = csv.writer(response)
+                writer.writerow([
+                    'time',
+                    'status',
+                    'duration_ms',
+                    'market_open',
+                    'llm_ok',
+                    'trades_recommended',
+                    'trades_executed',
+                    'issue_type',
+                    'symbol',
+                    'option_type',
+                    'strike',
+                    'message',
+                    'llm_error',
+                ])
+                for row in rows:
+                    writer.writerow([
+                        row.get('time') or '',
+                        row.get('status') or '',
+                        row.get('duration_ms') if row.get('duration_ms') is not None else '',
+                        row.get('market_open') if row.get('market_open') is not None else '',
+                        row.get('llm_ok') if row.get('llm_ok') is not None else '',
+                        row.get('trades_recommended', 0),
+                        row.get('trades_executed', 0),
+                        row.get('issue_type') or '',
+                        row.get('symbol') or '',
+                        row.get('option_type') or '',
+                        row.get('strike') if row.get('strike') is not None else '',
+                        row.get('message') or '',
+                        row.get('llm_error') or '',
+                    ])
+                elapsed = time.time() - start_time
+                logger.info(
+                    f"AnalyzeLogsView.get CSV completed in {elapsed:.2f}s: "
+                    f"{len(rows)}/{total} rows"
+                )
+                return response
+
+            elapsed = time.time() - start_time
+            logger.info(
+                f"AnalyzeLogsView.get completed in {elapsed:.2f}s: "
+                f"{len(rows)}/{total} rows"
+            )
+            return Response({
+                'days': days,
+                'limit': limit,
+                'total': total,
+                'returned': len(rows),
+                'status_filter': selected_statuses,
+                'logs': rows,
+            })
+
+        except Exception as e:
+            elapsed = time.time() - start_time
+            logger.error(f"AnalyzeLogsView.get failed in {elapsed:.2f}s: {e}")
             return Response({'error': str(e)}, status=500)
 
 
