@@ -3,6 +3,7 @@
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from loguru import logger
+from dataclasses import asdict, is_dataclass
 
 from .broker_factory import get_broker
 from .risk_controls import RiskManager
@@ -21,6 +22,30 @@ class OrderManager:
         self.risk_manager = RiskManager()
         self.executed_orders: List[Dict[str, Any]] = []
     
+    @staticmethod
+    def _normalize_order(order: Any) -> Optional[Dict[str, Any]]:
+        """Normalize broker order payload into dictionary shape."""
+        if order is None:
+            return None
+        if isinstance(order, dict):
+            return order
+        if is_dataclass(order):
+            return asdict(order)
+
+        # Fallback for objects exposing attributes but not dataclasses.
+        return {
+            'id': getattr(order, 'id', ''),
+            'symbol': getattr(order, 'symbol', ''),
+            'side': getattr(order, 'side', ''),
+            'qty': getattr(order, 'qty', 0),
+            'order_type': getattr(order, 'order_type', ''),
+            'status': getattr(order, 'status', ''),
+            'limit_price': getattr(order, 'limit_price', None),
+            'filled_qty': getattr(order, 'filled_qty', 0),
+            'filled_price': getattr(order, 'filled_price', None),
+            'created_at': getattr(order, 'created_at', None),
+        }
+
     def execute_trade(self, decision: TradeDecision) -> Optional[Dict[str, Any]]:
         """Execute a single trade based on LLM decision.
         
@@ -74,7 +99,8 @@ class OrderManager:
                 side=decision.action.lower()
             )
         
-        if order:
+        normalized_order = self._normalize_order(order)
+        if normalized_order:
             # Record the executed order
             execution_record = {
                 'timestamp': datetime.now().isoformat(),
@@ -85,15 +111,15 @@ class OrderManager:
                     'confidence': decision.confidence,
                     'reasoning': decision.reasoning
                 },
-                'order': order
+                'order': normalized_order
             }
             self.executed_orders.append(execution_record)
             
             logger.info(f"✅ Order executed: {decision.action} {decision.quantity} {decision.symbol}")
-            logger.info(f"   Order ID: {order['id']}")
-            logger.info(f"   Status: {order['status']}")
+            logger.info(f"   Order ID: {normalized_order.get('id', '')}")
+            logger.info(f"   Status: {normalized_order.get('status', '')}")
             
-        return order
+        return normalized_order
     
     def execute_trades(self, decisions: List[TradeDecision]) -> List[Dict[str, Any]]:
         """Execute multiple trades.
