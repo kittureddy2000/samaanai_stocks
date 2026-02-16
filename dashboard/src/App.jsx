@@ -1647,35 +1647,6 @@ function App() {
       {/* Page Content */}
       {currentPage === 'dashboard' && (
         <>
-          {/* Dashboard Hero Header */}
-          <div className="dash-header-row">
-            <div className="dash-hero-main">
-              <div className="dash-label">TRADING DASHBOARD</div>
-              <h2 className="dash-title">Your Portfolio at a Glance</h2>
-              <p className="dash-subtitle">
-                Real-time portfolio tracking, risk management, and trade execution powered by AI.
-              </p>
-              <div className="dash-quick-stats">
-                <div className="dash-stat-pill">
-                  <span className={`dash-status-dot ${market?.is_open ? 'active' : ''}`}></span>
-                  <span>{market?.is_open ? 'Market Open' : 'Market Closed'}</span>
-                </div>
-                <div className="dash-stat-pill">
-                  <span>Positions</span>
-                  <strong>{portfolio?.positions?.length || 0}</strong>
-                </div>
-                <div className="dash-stat-pill">
-                  <span>Portfolio</span>
-                  <strong>{formatCurrency(portfolio?.account?.portfolio_value || 0)}</strong>
-                </div>
-                <div className="dash-stat-pill">
-                  <span>LLM</span>
-                  <strong className={llmHealthy ? 'positive' : 'negative'}>{llmStatusText}</strong>
-                </div>
-              </div>
-            </div>
-          </div>
-
           <div className="main-grid">
             {/* Portfolio Card */}
             <div className="card portfolio-card">
