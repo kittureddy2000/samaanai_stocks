@@ -9,7 +9,7 @@ import os
 import time
 import threading
 from datetime import timedelta
-from typing import Dict
+from typing import Dict, List, Tuple
 from django.conf import settings
 from django.utils import timezone
 from rest_framework.views import APIView
@@ -26,6 +26,14 @@ _indicators_cache = {
     'results': [],
 }
 _indicators_cache_lock = threading.Lock()
+
+_POSITION_METRICS_CACHE_TTL_SECONDS = 300
+_position_metrics_cache = {
+    'timestamp': 0.0,
+    'symbols': tuple(),
+    'results': {},
+}
+_position_metrics_cache_lock = threading.Lock()
 
 INDICATOR_LABELS = {
     'rsi': 'RSI',
@@ -213,6 +221,190 @@ def build_runtime_settings_snapshot(effective_settings):
         'indicators_enabled': enabled,
         'indicators_disabled': disabled,
     }
+
+
+def _safe_float(value):
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    if result != result:  # NaN
+        return None
+    if result == float('inf') or result == float('-inf'):
+        return None
+    return result
+
+
+def _extract_close_series(downloaded, symbol, symbols):
+    """Extract close-price series from yfinance download output."""
+    try:
+        import pandas as pd
+    except Exception:
+        return None
+
+    if downloaded is None or getattr(downloaded, 'empty', True):
+        return None
+
+    try:
+        if isinstance(downloaded.columns, pd.MultiIndex):
+            if symbol not in downloaded.columns.get_level_values(0):
+                return None
+            df = downloaded[symbol]
+        else:
+            if len(symbols) != 1 or symbol != symbols[0]:
+                return None
+            df = downloaded
+        close_series = df['Close'] if 'Close' in df.columns else None
+        if close_series is None:
+            return None
+        close_series = close_series.dropna()
+        return close_series if not close_series.empty else None
+    except Exception:
+        return None
+
+
+def _get_position_market_metrics(symbols: List[str]) -> Dict[str, Dict]:
+    """Fetch supplemental market metrics for portfolio symbols with caching."""
+    clean_symbols = tuple(sorted({
+        str(symbol).upper().strip()
+        for symbol in (symbols or [])
+        if symbol
+    }))
+    if not clean_symbols:
+        return {}
+
+    now = time.time()
+    with _position_metrics_cache_lock:
+        cache_hit = (
+            _position_metrics_cache['results']
+            and _position_metrics_cache['symbols'] == clean_symbols
+            and (now - _position_metrics_cache['timestamp']) < _POSITION_METRICS_CACHE_TTL_SECONDS
+        )
+        if cache_hit:
+            return dict(_position_metrics_cache['results'])
+
+    defaults = {
+        'day_change_pct': None,
+        'ytd_return_pct': None,
+        'week_52_high': None,
+        'week_52_low': None,
+        'from_52w_high_pct': None,
+        'from_52w_low_pct': None,
+    }
+    results = {symbol: dict(defaults) for symbol in clean_symbols}
+
+    try:
+        import yfinance as yf
+
+        tickers = yf.Tickers(' '.join(clean_symbols))
+        ytd_download = yf.download(
+            tickers=' '.join(clean_symbols),
+            period='ytd',
+            interval='1d',
+            group_by='ticker',
+            auto_adjust=False,
+            progress=False,
+            threads=False,
+        )
+
+        for symbol in clean_symbols:
+            metric = dict(defaults)
+            ticker = tickers.tickers.get(symbol)
+            info = {}
+            fast_info = {}
+
+            if ticker is not None:
+                try:
+                    info = ticker.info or {}
+                except Exception:
+                    info = {}
+                try:
+                    fast_info = dict(getattr(ticker, 'fast_info', {}) or {})
+                except Exception:
+                    fast_info = {}
+
+            current_price = (
+                _safe_float(fast_info.get('lastPrice'))
+                or _safe_float(info.get('regularMarketPrice'))
+                or _safe_float(info.get('currentPrice'))
+            )
+            prev_close = (
+                _safe_float(fast_info.get('previousClose'))
+                or _safe_float(info.get('regularMarketPreviousClose'))
+            )
+            if current_price is not None and prev_close and prev_close > 0:
+                metric['day_change_pct'] = ((current_price - prev_close) / prev_close) * 100.0
+            else:
+                metric['day_change_pct'] = _safe_float(info.get('regularMarketChangePercent'))
+
+            metric['week_52_high'] = (
+                _safe_float(fast_info.get('yearHigh'))
+                or _safe_float(info.get('fiftyTwoWeekHigh'))
+            )
+            metric['week_52_low'] = (
+                _safe_float(fast_info.get('yearLow'))
+                or _safe_float(info.get('fiftyTwoWeekLow'))
+            )
+
+            ytd_close = _extract_close_series(ytd_download, symbol, clean_symbols)
+            if ytd_close is not None and len(ytd_close) >= 2:
+                start_price = _safe_float(ytd_close.iloc[0])
+                end_price = _safe_float(ytd_close.iloc[-1])
+                if start_price and start_price > 0 and end_price is not None:
+                    metric['ytd_return_pct'] = ((end_price - start_price) / start_price) * 100.0
+                    if current_price is None:
+                        current_price = end_price
+
+            if metric['week_52_high'] and metric['week_52_high'] > 0 and current_price is not None:
+                metric['from_52w_high_pct'] = (
+                    (current_price / metric['week_52_high']) - 1
+                ) * 100.0
+            if metric['week_52_low'] and metric['week_52_low'] > 0 and current_price is not None:
+                metric['from_52w_low_pct'] = (
+                    (current_price / metric['week_52_low']) - 1
+                ) * 100.0
+
+            results[symbol] = metric
+    except Exception as exc:
+        logger.warning(f"Position metrics enrichment unavailable, continuing without it: {exc}")
+
+    with _position_metrics_cache_lock:
+        _position_metrics_cache['timestamp'] = time.time()
+        _position_metrics_cache['symbols'] = clean_symbols
+        _position_metrics_cache['results'] = dict(results)
+
+    return results
+
+
+def _enrich_positions_with_market_metrics(positions: List[Dict]) -> List[Dict]:
+    """Attach daily/YTD/52w metrics to each position row."""
+    if not positions:
+        return positions
+
+    metrics_by_symbol = _get_position_market_metrics([p.get('symbol') for p in positions])
+    enriched = []
+
+    for pos in positions:
+        symbol = str(pos.get('symbol') or '').upper()
+        metrics = metrics_by_symbol.get(symbol, {})
+        total_pl_pct = None
+        raw_plpc = _safe_float(pos.get('unrealized_plpc'))
+        if raw_plpc is not None:
+            total_pl_pct = raw_plpc * 100.0
+
+        row = dict(pos)
+        row.update({
+            'total_pl_pct': total_pl_pct,
+            'day_change_pct': metrics.get('day_change_pct'),
+            'ytd_return_pct': metrics.get('ytd_return_pct'),
+            'week_52_high': metrics.get('week_52_high'),
+            'week_52_low': metrics.get('week_52_low'),
+            'from_52w_high_pct': metrics.get('from_52w_high_pct'),
+            'from_52w_low_pct': metrics.get('from_52w_low_pct'),
+        })
+        enriched.append(row)
+
+    return enriched
 
 
 def classify_operational_issue(message='', llm_error=''):
@@ -712,6 +904,7 @@ class PortfolioView(APIView):
             trading_client = get_trading_client()
             account = trading_client.get_account()
             positions = trading_client.get_positions()
+            positions = _enrich_positions_with_market_metrics(positions)
 
             if not account:
                 logger.warning("PortfolioView: account data unavailable, falling back to DB")
@@ -824,6 +1017,7 @@ class PortfolioView(APIView):
                 'unrealized_pl': float(ps.unrealized_pl),
                 'unrealized_plpc': float(ps.unrealized_plpc),
             })
+        positions = _enrich_positions_with_market_metrics(positions)
 
         logger.info(
             f"PortfolioView fallback from DB: "

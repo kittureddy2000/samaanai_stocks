@@ -2,6 +2,123 @@
 
 An AI-powered stock trading agent that uses **Google Gemini** to analyze market data and make automated trading decisions. Supports **Alpaca** (paper trading) and **Interactive Brokers** (live/paper).
 
+## Current Capabilities (As Built)
+
+This section documents what the application currently does in production.
+
+### 1) Authentication and Access
+
+- Google OAuth login via Django Allauth.
+- Email/password login and registration.
+- JWT-based API auth (access + refresh tokens).
+- Authorized email allow-list support (`AUTHORIZED_EMAILS`).
+
+### 2) Dashboard Pages and User Flows
+
+| Page | Purpose | Primary Data Source |
+|------|---------|---------------------|
+| Dashboard | Portfolio overview, risk, holdings, watchlist, trade history | IBKR + Cloud SQL fallback + yfinance enrichment |
+| Options Chain | Multi-expiration option chain with IV/price trends and sell recommendation | yfinance chain + Gemini (with fallback heuristic) |
+| Collar Strategy | Upside-target collar candidates across expirations | yfinance option data |
+| Settings | Runtime controls + indicator on/off toggles | Cloud SQL `AgentSettings` (applied at runtime) |
+| Operations | Health/diagnostics, daily run stats, Analyze trigger | Cloud SQL `AgentRunLog` + live checks |
+
+### 3) Portfolio and Positions Data
+
+- Live account and position data is pulled from IBKR through `ib_insync`.
+- If broker connectivity fails, API serves from last persisted Cloud SQL snapshot.
+- Position rows include standard trading metrics:
+  - Quantity, average cost, current price, market value.
+  - Unrealized P&L and Total P&L%.
+  - Day %, YTD %, 52-week high, 52-week low, and distance from 52-week high.
+- Supplemental symbol metrics are enriched with yfinance and cached server-side.
+
+### 4) Trading Decision Controls
+
+Runtime-configurable controls (Settings page):
+
+- Analysis interval (minutes)
+- Max position size (%)
+- Max daily loss (%)
+- Minimum confidence (%)
+- Stop loss (%)
+- Take profit (%)
+- Technical indicator toggles (RSI, MACD, MA, Bollinger, Volume, Price Action, VWAP, ATR)
+
+These are persisted to Cloud SQL and pushed into runtime config before each analysis cycle.
+
+### 5) What "Analyze Run" Actually Does
+
+`POST /api/analyze` performs one full trading cycle:
+
+1. Loads effective runtime settings (including indicator toggles).
+2. Enforces minimum interval between non-skipped runs.
+3. Checks market-open state.
+4. Pulls account cash + portfolio + current positions from broker.
+5. Runs market + indicator analysis and asks Gemini for trade recommendations.
+6. Filters recommendations by confidence threshold.
+7. Applies risk controls and executes approved orders through broker integration.
+8. Sends optional Slack notifications for recommended trades.
+9. Persists a structured run log entry (`AgentRunLog`) with status/details/errors.
+
+Possible run outcomes include:
+
+- `success`
+- `no_trades`
+- `no_response`
+- `skipped` (interval not reached, market closed)
+- `error`
+
+### 6) Options Chain Intelligence
+
+- User can fetch chain by symbol/strike/type.
+- API returns all expirations with liquidity/greeks/IV data.
+- LLM recommendation engine can select a preferred call/put sell candidate.
+- If Gemini is unavailable, heuristic fallback still produces a recommendation.
+- Recommendation payload includes premium %, annualized %, DTE, confidence, and rationale.
+
+### 7) Operational Visibility and Reliability
+
+- `Operations` page tracks:
+  - Analyze runs today.
+  - Trades executed today.
+  - Analyze errors and LLM failures.
+  - IBKR TCP health.
+  - Gemini key/rate-limit/error classification.
+  - Daily history table (rolling multi-day summary).
+- "Run Analyze Now" button triggers immediate cycle from UI.
+- Daily summary email includes portfolio/trade data plus operations diagnostics.
+
+### 8) Data Persistence
+
+Primary Cloud SQL models used operationally:
+
+- `User`: auth identity and profile.
+- `Trade`: executed/synced order history.
+- `PortfolioSnapshot`: periodic account-level snapshots.
+- `PositionSnapshot`: snapshot-level position rows.
+- `WatchlistItem`: per-user tracked symbols.
+- `AgentRunLog`: system-level operational diagnostics and run outcomes.
+- `AgentSettings`: runtime trading controls and indicator toggles.
+
+### 9) Deployment and Runtime Model
+
+- Frontend and backend are independently deployed to Cloud Run.
+- Backend connects privately to:
+  - Cloud SQL (via Cloud SQL connector).
+  - IBKR Gateway VM (via Serverless VPC connector).
+- Cloud Scheduler triggers:
+  - Analyze job during trading hours.
+  - Daily summary job near close/end of day.
+- GitHub Actions handles CI/CD for staging and production.
+
+### 10) Safety and Failure Behavior
+
+- Broker/API errors are logged and classified.
+- Portfolio endpoint falls back to DB snapshots during broker outages.
+- LLM failure does not crash UI; option-chain fallback still serves chain.
+- Settings persistence has migration and readiness safeguards in production workflow.
+
 ## Live Demo
 
 | Environment | Dashboard | API |
@@ -19,7 +136,8 @@ An AI-powered stock trading agent that uses **Google Gemini** to analyze market 
 | React | 18.x | UI Framework |
 | React Router | 6.x | Client-side Routing |
 | Axios | 1.x | HTTP Client |
-| Create React App | 5.x | Build Tool |
+| Vite | 5.x | Build Tool |
+| Recharts | 2.x | Charts & Graphs |
 | Jest | 29.x | Unit Testing |
 | Cypress | 13.x | E2E Testing |
 
@@ -52,6 +170,7 @@ An AI-powered stock trading agent that uses **Google Gemini** to analyze market 
 | **Interactive Brokers** | Live/Paper Trading (Primary) |
 | **Alpaca** | Paper Trading & Market Data (Fallback) |
 | Google Gemini | LLM Analysis |
+| yfinance | Option Chain Data (Free) |
 | NewsAPI | Sentiment Analysis (Optional) |
 | Slack | Trade Notifications (Optional) |
 
@@ -124,7 +243,8 @@ Stock Trading/
 ├── trading_api/                 # Main Django app
 │   ├── models/
 │   │   ├── user.py             # Custom User model
-│   │   └── trade.py            # Trade & PortfolioSnapshot
+│   │   ├── trade.py            # Trade & PortfolioSnapshot
+│   │   └── watchlist.py        # WatchlistItem (per-user)
 │   ├── views/
 │   │   ├── auth.py             # JWT + OAuth endpoints
 │   │   └── api.py              # Trading API endpoints
@@ -134,10 +254,11 @@ Stock Trading/
 │   ├── services/               # Business logic wrapper
 │   └── admin.py                # Django admin config
 │
-├── frontend/                    # React Dashboard (CRA)
+├── dashboard/                   # React Dashboard (Vite)
 │   ├── src/
-│   │   ├── App.js              # Main component
-│   │   └── services/api.js     # API client with JWT
+│   │   ├── App.jsx             # Main component + pages
+│   │   ├── api.js              # API client with JWT
+│   │   └── index.css           # Styles
 │   ├── package.json
 │   └── Dockerfile
 │
@@ -152,9 +273,11 @@ Stock Trading/
 │   │   ├── order_manager.py    # Order execution
 │   │   ├── portfolio.py        # Portfolio tracking
 │   │   └── risk_controls.py    # Risk management
-│   └── data/                   # Market data
-│       ├── market_data.py      # Price data
-│       └── technical_indicators.py
+│   ├── data/                   # Market data
+│   │   ├── market_data.py      # Price data
+│   │   └── technical_indicators.py
+│   └── utils/
+│       └── greeks.py           # Black-Scholes Greeks calculator
 │
 ├── scripts/                     # Utility scripts
 │   └── migrate_data.py         # SQLite -> PostgreSQL migration
@@ -577,7 +700,9 @@ gcloud run domain-mappings create \
 |----------|--------|-------------|
 | `/auth/register` | POST | Register with email/password |
 | `/auth/login` | POST | Login, returns JWT tokens |
-| `/auth/logout` | POST | Blacklist refresh token |
+| `/auth/logout` | GET/POST | Logout (GET redirects to frontend) |
+| `/auth/google` | GET | Redirect to Google OAuth |
+| `/auth/google/callback` | POST | Process Google OAuth token |
 | `/auth/me` | GET | Get current user info |
 | `/auth/token/refresh` | POST | Refresh access token |
 
@@ -591,10 +716,69 @@ gcloud run domain-mappings create \
 | `/api/risk` | GET | Risk status & limits |
 | `/api/market` | GET | Market open/close status |
 | `/api/watchlist` | GET | Watchlist with prices |
+| `/api/watchlist` | POST | Add symbol to watchlist |
+| `/api/watchlist` | DELETE | Remove symbol from watchlist |
 | `/api/trades` | GET | Trade history |
 | `/api/config` | GET | Trading configuration |
 | `/api/indicators` | GET | Technical indicators |
 | `/api/analyze` | POST | Trigger trading analysis |
+| `/api/option-chain` | GET | Option chain with Greeks |
+| `/api/collar-strategy` | GET | Zero-cost collar finder |
+
+---
+
+## Dashboard Features
+
+### Pages
+
+| Page | Description |
+|------|-------------|
+| **Dashboard** | Portfolio overview, positions, watchlist, trade history |
+| **Options Chain** | View option chains with Greeks, IV trend charts |
+| **Collar Strategy** | Find zero-cost collar combinations |
+
+### Interactive Features
+
+- **Sortable Tables** - Click column headers to sort (Positions, Watchlist, Trades, Options)
+- **Watchlist Management** - Add/remove symbols with real-time prices
+- **Market Status** - Live indicator with DST-aware timezone handling
+
+---
+
+## Option Chain Data
+
+### Current Implementation
+
+**Data Source:** yfinance (Yahoo Finance) - FREE
+
+The option chain endpoint (`/api/option-chain`) fetches:
+- All available expiration dates
+- Strike prices with bid/ask/last prices
+- Volume and open interest
+- Implied volatility
+
+**Greeks Calculation:** Black-Scholes model (server-side)
+- File: `src/utils/greeks.py`
+- Computes: Delta, Gamma, Theta, Vega
+
+### Limitations of yfinance
+
+| Issue | Impact |
+|-------|--------|
+| 15-20 min delayed data | Not suitable for real-time trading |
+| Rate limits | No caching implemented |
+| Reliability | Yahoo may block excessive requests |
+
+### Recommended Alternatives
+
+| Provider | Cost | Real-time | Notes |
+|----------|------|-----------|-------|
+| **IBKR** | Free with account | Yes | Best choice - already integrated |
+| **Tradier** | $10/mo | Yes | Popular for options |
+| **Polygon.io** | $29-199/mo | Yes | Professional grade |
+| **TD Ameritrade** | Free with account | Yes | Requires brokerage |
+
+**Recommendation:** Extend IBKR integration for real-time options data since the broker is already connected for trading.
 
 ---
 
@@ -608,6 +792,42 @@ gcloud run domain-mappings create \
 | **Stop Loss** | 5% | Default stop-loss per trade |
 | **Take Profit** | 10% | Default take-profit target |
 | **Kill Switch** | Manual | Emergency stop for all trading |
+
+---
+
+## Technical Indicators
+
+The trading agent uses the following technical indicators for analysis (implemented in `src/data/technical_indicators.py`):
+
+| Indicator | Parameters | Signals | Purpose |
+|-----------|------------|---------|---------|
+| **RSI** | Period: 14 | OVERBOUGHT (≥70), OVERSOLD (≤30), BULLISH, BEARISH, NEUTRAL | Momentum & reversal detection |
+| **MACD** | Fast: 12, Slow: 26, Signal: 9 | BULLISH, BEARISH, NEUTRAL | Trend direction & crossovers |
+| **SMA** | 20-day, 50-day | ABOVE/BELOW moving averages | Long-term trend |
+| **EMA** | 12-day, 26-day | BULLISH (EMA12 > EMA26), BEARISH | Short-term trend |
+| **Bollinger Bands** | Period: 20, StdDev: 2.0 | OVERBOUGHT, OVERSOLD, UPPER_BAND, LOWER_BAND | Volatility & support/resistance |
+| **Volume Analysis** | 20-day average | VERY_HIGH (>2x), HIGH (>1.5x), LOW, NORMAL | Trend confirmation |
+| **VWAP** | Intraday | ABOVE/BELOW (strong/normal) | Fair value vs price |
+| **ATR** | Period: 14 | VERY_HIGH, HIGH, MODERATE, LOW volatility | Risk assessment & stop-loss |
+| **Price Changes** | 1-day, 5-day, 20-day | Percentage change | Momentum strength |
+
+### Signal Generation
+
+All indicators are aggregated into an overall signal using a voting system:
+- **BULLISH**: More bullish signals than bearish (by 2+)
+- **BEARISH**: More bearish signals than bullish (by 2+)
+- **NEUTRAL**: Signals are balanced
+
+### Strategy-Specific Usage
+
+| Strategy | Key Indicators |
+|----------|---------------|
+| **Momentum** | RSI > 50, MACD bullish crossover, price above VWAP |
+| **Mean Reversion** | RSI < 30, price at lower Bollinger Band |
+| **Contrarian** | Volume exhaustion, OBV divergence |
+| **Balanced** (default) | Confluence of all signals, 2:1 risk/reward |
+
+All indicators are implemented in pure pandas with no external TA library dependencies.
 
 ---
 

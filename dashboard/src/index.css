@@ -1244,6 +1244,12 @@ td {
   gap: 10px;
 }
 
+.operations-run-help {
+  margin: -12px 0 14px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 .operations-analyze-result {
   margin-bottom: 12px;
   padding: 10px 12px;
@@ -1324,6 +1330,11 @@ td {
   margin-bottom: 28px;
 }
 
+.dash-hero-main {
+  flex: 1;
+  min-width: 0;
+}
+
 .dash-label {
   font-size: 12px;
   font-weight: 700;
@@ -1345,6 +1356,30 @@ td {
   font-size: 13px;
   line-height: 1.5;
   max-width: 480px;
+}
+
+.dash-quick-stats {
+  margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.dash-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dash-stat-pill strong {
+  color: var(--text-primary);
 }
 
 .dash-status-card {

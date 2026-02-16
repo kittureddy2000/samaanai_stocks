@@ -61,6 +61,16 @@ const formatPercent = (value) => {
   return `${sign}${value.toFixed(2)}%`;
 };
 
+const formatPercentOrDash = (value) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? formatPercent(n) : '--';
+};
+
+const formatCurrencyOrDash = (value) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? formatCurrency(n) : '--';
+};
+
 const computePremiumPct = (premium, underlyingPrice) => {
   const p = Number(premium);
   const u = Number(underlyingPrice);
@@ -905,6 +915,9 @@ function OperationsPage({ data, loading, error, onRefresh, onRunAnalyze, analyze
           </button>
         </div>
       </div>
+      <p className="operations-run-help">
+        Run Analyze Now executes one full cycle: market-open and interval checks, Gemini analysis, confidence/risk filtering, broker order placement, and run logging.
+      </p>
 
       {error && <div className="oc-form-error">{error}</div>}
       {analyzeState.error && <div className="oc-form-error">{analyzeState.error}</div>}
@@ -1636,21 +1649,29 @@ function App() {
         <>
           {/* Dashboard Hero Header */}
           <div className="dash-header-row">
-            <div>
+            <div className="dash-hero-main">
               <div className="dash-label">TRADING DASHBOARD</div>
               <h2 className="dash-title">Your Portfolio at a Glance</h2>
               <p className="dash-subtitle">
                 Real-time portfolio tracking, risk management, and trade execution powered by AI.
               </p>
-            </div>
-            <div className="dash-status-card">
-              <div className="dash-status-label">BROKER STATUS</div>
-              <div className="dash-status-value">
-                <span className={`dash-status-dot ${market?.is_open ? 'active' : ''}`}></span>
-                {market?.is_open ? 'Market Open' : 'Market Closed'}
-              </div>
-              <div className="dash-status-detail">
-                {portfolio?.positions?.length || 0} positions &middot; {formatCurrency(portfolio?.account?.portfolio_value || 0)}
+              <div className="dash-quick-stats">
+                <div className="dash-stat-pill">
+                  <span className={`dash-status-dot ${market?.is_open ? 'active' : ''}`}></span>
+                  <span>{market?.is_open ? 'Market Open' : 'Market Closed'}</span>
+                </div>
+                <div className="dash-stat-pill">
+                  <span>Positions</span>
+                  <strong>{portfolio?.positions?.length || 0}</strong>
+                </div>
+                <div className="dash-stat-pill">
+                  <span>Portfolio</span>
+                  <strong>{formatCurrency(portfolio?.account?.portfolio_value || 0)}</strong>
+                </div>
+                <div className="dash-stat-pill">
+                  <span>LLM</span>
+                  <strong className={llmHealthy ? 'positive' : 'negative'}>{llmStatusText}</strong>
+                </div>
               </div>
             </div>
           </div>
@@ -1726,14 +1747,23 @@ function App() {
                       <SortTh label="Current" sortKey="current_price" currentKey={posSortKey} currentDir={posSortDir} onSort={posHandleSort} />
                       <SortTh label="Mkt Value" sortKey="market_value" currentKey={posSortKey} currentDir={posSortDir} onSort={posHandleSort} />
                       <SortTh label="P&L" sortKey="unrealized_pl" currentKey={posSortKey} currentDir={posSortDir} onSort={posHandleSort} />
-                      <SortTh label="P&L %" sortKey="unrealized_plpc" currentKey={posSortKey} currentDir={posSortDir} onSort={posHandleSort} />
+                      <SortTh label="Total P&L %" sortKey="total_pl_pct" currentKey={posSortKey} currentDir={posSortDir} onSort={posHandleSort} />
+                      <SortTh label="Day %" sortKey="day_change_pct" currentKey={posSortKey} currentDir={posSortDir} onSort={posHandleSort} />
+                      <SortTh label="YTD %" sortKey="ytd_return_pct" currentKey={posSortKey} currentDir={posSortDir} onSort={posHandleSort} />
+                      <SortTh label="52W High" sortKey="week_52_high" currentKey={posSortKey} currentDir={posSortDir} onSort={posHandleSort} />
+                      <SortTh label="52W Low" sortKey="week_52_low" currentKey={posSortKey} currentDir={posSortDir} onSort={posHandleSort} />
+                      <SortTh label="From 52W High %" sortKey="from_52w_high_pct" currentKey={posSortKey} currentDir={posSortDir} onSort={posHandleSort} />
                     </tr>
                   </thead>
                   <tbody>
                     {sortedPositions.length === 0 ? (
-                      <tr><td colSpan="7" className="empty-state">No positions (100% cash)</td></tr>
+                      <tr><td colSpan="13" className="empty-state">No positions (100% cash)</td></tr>
                     ) : (
-                      sortedPositions.map((pos) => (
+                      sortedPositions.map((pos) => {
+                        const totalPlPct = Number.isFinite(Number(pos.total_pl_pct))
+                          ? Number(pos.total_pl_pct)
+                          : (Number.isFinite(Number(pos.unrealized_plpc)) ? Number(pos.unrealized_plpc) * 100 : null);
+                        return (
                         <tr key={pos.symbol}>
                           <td className="symbol-highlight">{pos.symbol}</td>
                           <td>{pos.qty}</td>
@@ -1743,11 +1773,23 @@ function App() {
                           <td className={pos.unrealized_pl >= 0 ? 'positive' : 'negative'}>
                             {formatCurrency(pos.unrealized_pl)}
                           </td>
-                          <td className={pos.unrealized_plpc >= 0 ? 'positive' : 'negative'}>
-                            {formatPercent(pos.unrealized_plpc * 100)}
+                          <td className={(totalPlPct ?? 0) >= 0 ? 'positive' : 'negative'}>
+                            {formatPercentOrDash(totalPlPct)}
+                          </td>
+                          <td className={(pos.day_change_pct ?? 0) >= 0 ? 'positive' : 'negative'}>
+                            {formatPercentOrDash(pos.day_change_pct)}
+                          </td>
+                          <td className={(pos.ytd_return_pct ?? 0) >= 0 ? 'positive' : 'negative'}>
+                            {formatPercentOrDash(pos.ytd_return_pct)}
+                          </td>
+                          <td>{formatCurrencyOrDash(pos.week_52_high)}</td>
+                          <td>{formatCurrencyOrDash(pos.week_52_low)}</td>
+                          <td className={(pos.from_52w_high_pct ?? 0) >= 0 ? 'positive' : 'negative'}>
+                            {formatPercentOrDash(pos.from_52w_high_pct)}
                           </td>
                         </tr>
-                      ))
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
