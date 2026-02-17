@@ -65,6 +65,7 @@ jobs:
             INSTANCE_CONNECTION_NAME=samaanai-stg-1009-124126:us-west1:samaanai-backend-staging-db
             ALLOWED_HOSTS=stg.trading.samaanai.com,trading-api-staging-362270100637.us-west1.run.app
             FRONTEND_URL=https://trading-dashboard-staging-362270100637.us-west1.run.app
+            PLAID_ENV=sandbox
             BROKER_TYPE=ibkr
             IBKR_GATEWAY_HOST=10.138.0.3
             IBKR_GATEWAY_PORT=4004
