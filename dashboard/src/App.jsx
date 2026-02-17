@@ -2095,6 +2095,16 @@ function App() {
       hasChange: Number.isFinite(change) && Number.isFinite(changePct),
     };
   });
+  const lastExecutedTrade = (trades || []).find((trade) => {
+    const status = (trade?.status || '').toLowerCase();
+    return status === 'filled' || status === 'executed';
+  });
+  const lastTradeSummary = lastExecutedTrade
+    ? `${lastExecutedTrade.action || '--'} ${lastExecutedTrade.symbol || ''}`.trim()
+    : 'No recent trade';
+  const lastTradeTime = lastExecutedTrade?.created_at
+    ? new Date(lastExecutedTrade.created_at).toLocaleString()
+    : '--';
 
   return (
     <div className="dashboard">
@@ -2267,8 +2277,25 @@ function App() {
           <div className="main-grid">
             {/* Portfolio Card */}
             <div className="card portfolio-card">
-              <div className="card-label">OVERVIEW</div>
-              <h2>Portfolio</h2>
+              <div className="portfolio-header-row">
+                <div>
+                  <div className="card-label">OVERVIEW</div>
+                  <h2>Portfolio</h2>
+                </div>
+                <div className="risk-market-strip portfolio-market-strip">
+                  {riskIndexCards.map((idx) => (
+                    <div key={idx.key} className="risk-market-chip">
+                      <span className="risk-market-label">{idx.label}</span>
+                      <span className="risk-market-price">
+                        {Number.isFinite(Number(idx.price)) ? formatCurrency(Number(idx.price)) : '--'}
+                      </span>
+                      <span className={`risk-market-change ${idx.hasChange ? (idx.change >= 0 ? 'positive' : 'negative') : ''}`}>
+                        {idx.hasChange ? `${idx.change >= 0 ? '+' : ''}${idx.change.toFixed(2)} (${idx.changePct >= 0 ? '+' : ''}${idx.changePct.toFixed(2)}%)` : '--'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
               <div className="portfolio-value">
                 <span className="label">Total Value</span>
                 <span className="value">{formatCurrency(portfolio?.account?.portfolio_value || 0)}</span>
@@ -2307,8 +2334,9 @@ function App() {
                   <span className="value">{risk?.daily_trades || 0}</span>
                 </div>
                 <div className="stat">
-                  <span className="label">Daily Loss</span>
-                  <span className="value">{formatCurrency(risk?.daily_loss || 0)}</span>
+                  <span className="label">Last Trade/Time</span>
+                  <span className="value">{lastTradeSummary}</span>
+                  <span className="subvalue">{lastTradeTime}</span>
                 </div>
                 <div className="stat">
                   <span className="label">Max Position</span>
@@ -2318,19 +2346,6 @@ function App() {
                   <span className="label">Kill Switch</span>
                   <span className="value">{risk?.kill_switch_active ? 'Active' : 'Inactive'}</span>
                 </div>
-              </div>
-              <div className="risk-market-strip">
-                {riskIndexCards.map((idx) => (
-                  <div key={idx.key} className="risk-market-chip">
-                    <span className="risk-market-label">{idx.label}</span>
-                    <span className="risk-market-price">
-                      {Number.isFinite(Number(idx.price)) ? formatCurrency(Number(idx.price)) : '--'}
-                    </span>
-                    <span className={`risk-market-change ${idx.hasChange ? (idx.change >= 0 ? 'positive' : 'negative') : ''}`}>
-                      {idx.hasChange ? `${idx.change >= 0 ? '+' : ''}${idx.change.toFixed(2)} (${idx.changePct >= 0 ? '+' : ''}${idx.changePct.toFixed(2)}%)` : '--'}
-                    </span>
-                  </div>
-                ))}
               </div>
             </div>
 

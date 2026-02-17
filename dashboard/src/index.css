@@ -247,6 +247,13 @@ body {
   font-weight: 600;
 }
 
+.stat .subvalue {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
 .positive {
   color: var(--accent-green) !important;
 }
@@ -295,11 +302,23 @@ body {
   gap: 8px;
 }
 
+.portfolio-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
 .risk-market-strip {
   margin-top: 12px;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+}
+
+.portfolio-market-strip {
+  margin-top: 0;
+  min-width: min(640px, 60%);
 }
 
 .risk-market-chip {
@@ -601,6 +620,15 @@ td {
 
   .portfolio-stats {
     grid-template-columns: 1fr;
+  }
+
+  .portfolio-header-row {
+    flex-direction: column;
+  }
+
+  .portfolio-market-strip {
+    width: 100%;
+    min-width: 0;
   }
 
   .risk-stats {
