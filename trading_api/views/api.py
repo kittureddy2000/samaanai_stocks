@@ -1606,7 +1606,12 @@ class AnalyzeLogsView(APIView):
             limit = max(1, min(limit, 2000))
 
             include_details = self._is_truthy(request.query_params.get('include_details', '0'))
-            export_format = (request.query_params.get('format', 'json') or 'json').strip().lower()
+            # Do not use query param "format" here; DRF reserves it for renderer negotiation.
+            export_format = (
+                request.query_params.get('export')
+                or request.query_params.get('download')
+                or 'json'
+            ).strip().lower()
 
             valid_statuses = {choice[0] for choice in AgentRunLog.STATUS_CHOICES}
             requested_statuses = [

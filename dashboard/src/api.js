@@ -173,7 +173,7 @@ export const getAnalyzeLogs = async (days = 14, limit = 200, status = '') => {
 };
 
 export const exportAnalyzeLogsCsv = async (days = 14, limit = 1000, status = '') => {
-    const params = { days, limit, format: 'csv' };
+    const params = { days, limit, export: 'csv' };
     if (status) params.status = status;
     const response = await api.get('/api/analyze-logs', {
         params,
