@@ -568,6 +568,71 @@ def classify_operational_issue(message='', llm_error=''):
     return 'other'
 
 
+NON_EXECUTED_ORDER_STATUSES = {
+    'rejected',
+    'cancelled',
+    'canceled',
+    'inactive',
+    'failed',
+    'error',
+    'api_error',
+}
+
+
+def normalize_order_status(status) -> str:
+    """Normalize broker/order status text to lowercase token form."""
+    value = str(status or '').strip().lower()
+    value = value.replace('orderstatus.', '').replace('order_status.', '')
+    return value.replace(' ', '_')
+
+
+def is_countable_trade_record(record: Dict) -> bool:
+    """Return True if the record should count as an executed/placed trade."""
+    side = str(record.get('side') or record.get('action') or '').strip().upper()
+    if side not in ('BUY', 'SELL'):
+        return False
+
+    status = normalize_order_status(record.get('status'))
+    if status in NON_EXECUTED_ORDER_STATUSES:
+        return False
+
+    # Broker-generated orders should carry a stable id; treat missing id as
+    # non-countable unless status clearly indicates a completed trade.
+    order_id = record.get('id') or record.get('order_id')
+    if order_id:
+        return True
+
+    return status in {'filled', 'executed', 'partially_filled', 'partial_fill'}
+
+
+def count_countable_trades(records: List[Dict]) -> int:
+    """Count trades that represent actual placed/executed orders."""
+    return sum(1 for record in records if is_countable_trade_record(record or {}))
+
+
+def count_db_trades_for_local_day(local_day) -> int:
+    """Count countable trades in DB for a given local calendar day."""
+    from trading_api.models import Trade
+
+    tz = timezone.get_current_timezone()
+    start = timezone.make_aware(datetime.combine(local_day, datetime.min.time()), timezone=tz)
+    end = start + timedelta(days=1)
+
+    rows = Trade.objects.filter(created_at__gte=start, created_at__lt=end).values(
+        'order_id', 'status', 'action'
+    )
+    return count_countable_trades(
+        [
+            {
+                'order_id': row.get('order_id'),
+                'status': row.get('status'),
+                'action': row.get('action'),
+            }
+            for row in rows
+        ]
+    )
+
+
 def build_operations_summary(days=14):
     """Build operations health summary for UI/email."""
     from trading_api.models.trade import AgentRunLog
@@ -642,7 +707,7 @@ def build_operations_summary(days=14):
             if last_analyze_settings is None and isinstance(details, dict):
                 last_analyze_settings = details.get('settings')
 
-        bucket['trades_executed'] += int(run.get('trades_executed') or 0)
+            bucket['trades_executed'] += int(run.get('trades_executed') or 0)
 
         issue_type = classify_operational_issue(message, llm_error)
         if issue_type == 'ibkr_gateway':
@@ -664,6 +729,24 @@ def build_operations_summary(days=14):
             })
 
     today = per_day.get(today_key, next(iter(per_day.values())))
+
+    # Reconcile today's trade count against persisted trade history so this
+    # metric matches what users see in Trade History.
+    try:
+        trading_client = get_trading_client()
+        broker_orders = trading_client.get_orders_history(limit=300)
+        if broker_orders:
+            sync_trades_to_db(broker_orders, user=None)
+    except Exception as exc:
+        logger.warning(f"Operations summary broker trade sync skipped: {exc}")
+
+    try:
+        db_trade_count_today = count_db_trades_for_local_day(timezone.localdate(now))
+        if today_key in per_day:
+            per_day[today_key]['trades_executed'] = db_trade_count_today
+        today['trades_executed'] = db_trade_count_today
+    except Exception as exc:
+        logger.warning(f"Operations summary DB trade count unavailable: {exc}")
 
     has_gemini_key = bool(
         settings.TRADING_CONFIG.get('GEMINI_API_KEY')
@@ -3274,6 +3357,12 @@ class AnalyzeView(APIView):
 
             # Execute trades
             executed = order_manager.execute_trades(valid_trades)
+            executed_count = count_countable_trades(executed)
+            executed_order_ids = [
+                str(order.get('id'))
+                for order in executed
+                if order and is_countable_trade_record(order) and order.get('id')
+            ]
 
             # Send Slack notifications
             for trade in valid_trades:
@@ -3288,27 +3377,29 @@ class AnalyzeView(APIView):
             elapsed = time.time() - start_time
             logger.info(
                 f"AnalyzeView.post completed in {elapsed:.2f}s: "
-                f"{len(executed)} trades executed"
+                f"{executed_count} trades executed"
             )
 
             record_agent_run(
                 run_type='analyze',
                 status='success',
                 start_time=start_time,
-                message=f"{len(executed)} trades executed",
+                message=f"{executed_count} trades executed",
                 market_open=True,
                 llm_ok=True,
                 trades_recommended=len(valid_trades),
-                trades_executed=len(executed),
+                trades_executed=executed_count,
                 details={
                     'analysis_summary': response.analysis_summary,
                     'settings': settings_snapshot,
+                    'executed_order_ids': executed_order_ids,
+                    'raw_execute_results': len(executed),
                 },
             )
 
             return Response({
                 'status': 'success',
-                'trades_executed': len(executed),
+                'trades_executed': executed_count,
                 'trades': [
                     {'symbol': t.symbol, 'action': t.action, 'quantity': t.quantity}
                     for t in valid_trades
