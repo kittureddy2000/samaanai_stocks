@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { getPortfolio, getRisk, getMarket, getWatchlist, getTrades, getAgentStatus, getOperationsSummary, getAnalyzeLogs, exportAnalyzeLogsCsv, runAnalyzeNow, getConfig, updateConfig, getCurrentUser, getLoginUrl, register, login, logout, getOptionChain, getCollarStrategy, addToWatchlist, removeFromWatchlist, setTokens } from './api';
+import { getPortfolio, getRisk, getMarket, getWatchlist, getTrades, getAgentStatus, getOperationsSummary, getAnalyzeLogs, exportAnalyzeLogsCsv, runAnalyzeNow, getConfig, updateConfig, getCurrentUser, getLoginUrl, register, login, logout, getOptionChain, getCollarStrategy, getPlaidOverview, createPlaidLinkToken, exchangePlaidPublicToken, syncPlaidItem, disconnectPlaidItem, addToWatchlist, removeFromWatchlist, setTokens } from './api';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import './App.css';
 
@@ -142,6 +142,34 @@ const getSignalClass = (signal) => {
   if (s.includes('BUY') || s.includes('OVERSOLD') || s.includes('BULLISH')) return 'positive';
   if (s.includes('SELL') || s.includes('OVERBOUGHT') || s.includes('BEARISH')) return 'negative';
   return '';
+};
+
+const PLAID_SCRIPT_URL = 'https://cdn.plaid.com/link/v2/stable/link-initialize.js';
+let plaidScriptPromise = null;
+const loadPlaidScript = () => {
+  if (typeof window === 'undefined') {
+    return Promise.reject(new Error('Plaid Link requires a browser environment.'));
+  }
+  if (window.Plaid) return Promise.resolve(window.Plaid);
+  if (plaidScriptPromise) return plaidScriptPromise;
+
+  plaidScriptPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${PLAID_SCRIPT_URL}"]`);
+    if (existing) {
+      existing.addEventListener('load', () => resolve(window.Plaid));
+      existing.addEventListener('error', () => reject(new Error('Failed to load Plaid Link SDK.')));
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = PLAID_SCRIPT_URL;
+    script.async = true;
+    script.onload = () => resolve(window.Plaid);
+    script.onerror = () => reject(new Error('Failed to load Plaid Link SDK.'));
+    document.body.appendChild(script);
+  });
+
+  return plaidScriptPromise;
 };
 
 // ============================================================
@@ -1124,6 +1152,299 @@ function OperationsPage({
 
 
 // ============================================================
+// Plaid Integrations Page
+// ============================================================
+function PlaidPage({
+  data,
+  loading,
+  error,
+  linkState,
+  actionState,
+  onRefresh,
+  onConnect,
+  onManualSync,
+  onDisconnect,
+}) {
+  const items = data?.items || [];
+  const holdings = data?.holdings || [];
+  const transactions = data?.transactions || [];
+  const syncLogs = data?.sync_logs || [];
+
+  const allAccounts = items.flatMap((item) =>
+    (item.accounts || []).map((account) => ({
+      ...account,
+      institution_name: item.institution_name,
+      product_type: item.product_type,
+    }))
+  );
+  const bankAccounts = allAccounts.filter((account) => account.type !== 'investment');
+
+  const { sorted: sortedItems, sortKey: itemsSortKey, sortDir: itemsSortDir, handleSort: itemsSort } = useSortableTable(items, 'institution_name');
+  const { sorted: sortedBankAccounts, sortKey: bankSortKey, sortDir: bankSortDir, handleSort: bankSort } = useSortableTable(bankAccounts, 'institution_name');
+  const { sorted: sortedHoldings, sortKey: holdSortKey, sortDir: holdSortDir, handleSort: holdSort } = useSortableTable(holdings, 'value');
+  const { sorted: sortedTransactions, sortKey: txSortKey, sortDir: txSortDir, handleSort: txSort } = useSortableTable(transactions, 'date');
+  const { sorted: sortedSyncLogs, sortKey: syncSortKey, sortDir: syncSortDir, handleSort: syncSort } = useSortableTable(syncLogs, 'started_at');
+
+  return (
+    <div className="plaid-page">
+      <div className="dash-header-row">
+        <div>
+          <div className="dash-label">PLAID INTEGRATIONS</div>
+          <h2 className="dash-title">Connected Brokerages and Banks</h2>
+          <p className="dash-subtitle">
+            Read-only ingestion. No portfolio merge. Manual sync only.
+          </p>
+        </div>
+        <div className="operations-actions">
+          <button className="btn-refresh" onClick={() => onConnect('investments')} disabled={linkState.loading}>
+            {linkState.loading && linkState.mode === 'investments' ? 'Connecting...' : 'Connect Brokerage'}
+          </button>
+          <button className="btn-refresh" onClick={() => onConnect('bank')} disabled={linkState.loading}>
+            {linkState.loading && linkState.mode === 'bank' ? 'Connecting...' : 'Connect Bank'}
+          </button>
+          <button className="btn-refresh" onClick={onRefresh} disabled={loading}>
+            {loading ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
+      </div>
+
+      {error && <div className="oc-form-error">{error}</div>}
+      {linkState.error && <div className="oc-form-error">{linkState.error}</div>}
+      {actionState.error && <div className="oc-form-error">{actionState.error}</div>}
+      {actionState.success && <div className="operations-analyze-result">{actionState.success}</div>}
+
+      <div className="main-grid operations-grid">
+        <div className="card">
+          <div className="card-label">PLAID STATUS</div>
+          <h2>Environment</h2>
+          <div className="operations-stat-row"><span>Configured</span><strong>{data?.configured ? 'Yes' : 'No'}</strong></div>
+          <div className="operations-stat-row"><span>Environment</span><strong>{data?.env || '--'}</strong></div>
+          <div className="operations-stat-row"><span>Manual Sync</span><strong>{data?.manual_sync_only ? 'Enabled' : 'No'}</strong></div>
+          <div className="operations-stat-row"><span>Connected Items</span><strong>{items.length}</strong></div>
+        </div>
+        <div className="card">
+          <div className="card-label">SUMMARY</div>
+          <h2>Ingested Records</h2>
+          <div className="operations-stat-row"><span>Bank Accounts</span><strong>{bankAccounts.length}</strong></div>
+          <div className="operations-stat-row"><span>Stock Holdings</span><strong>{holdings.length}</strong></div>
+          <div className="operations-stat-row"><span>Investment Transactions</span><strong>{transactions.length}</strong></div>
+          <div className="operations-stat-row"><span>Sync Logs</span><strong>{syncLogs.length}</strong></div>
+        </div>
+      </div>
+
+      <div className="card operations-table-card">
+        <div className="card-label">CONNECTED ITEMS</div>
+        <h2>Institutions</h2>
+        <div className="positions">
+          <table className="positions-table">
+            <thead>
+              <tr>
+                <SortTh label="Institution" sortKey="institution_name" currentKey={itemsSortKey} currentDir={itemsSortDir} onSort={itemsSort} />
+                <SortTh label="Type" sortKey="product_type" currentKey={itemsSortKey} currentDir={itemsSortDir} onSort={itemsSort} />
+                <th>Status</th>
+                <th>Accounts</th>
+                <th>Holdings</th>
+                <th>Transactions</th>
+                <SortTh label="Last Sync" sortKey="last_sync_at" currentKey={itemsSortKey} currentDir={itemsSortDir} onSort={itemsSort} />
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedItems.length === 0 ? (
+                <tr><td colSpan="8" className="empty-state">No Plaid institutions connected yet.</td></tr>
+              ) : (
+                sortedItems.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.institution_name}</td>
+                    <td>{item.product_type}</td>
+                    <td className={item.status === 'active' ? 'positive' : 'negative'}>{item.status}</td>
+                    <td>{item.counts?.accounts ?? 0}</td>
+                    <td>{item.counts?.holdings ?? 0}</td>
+                    <td>{item.counts?.transactions ?? 0}</td>
+                    <td>{item.last_sync_at ? new Date(item.last_sync_at).toLocaleString() : '--'}</td>
+                    <td>
+                      <div className="plaid-actions">
+                        <button
+                          className="btn-refresh"
+                          onClick={() => onManualSync(item.id)}
+                          disabled={actionState.syncingItemId === item.id || actionState.disconnectingItemId === item.id}
+                        >
+                          {actionState.syncingItemId === item.id ? 'Syncing...' : 'Sync Now'}
+                        </button>
+                        <button
+                          className="btn-remove-watchlist"
+                          onClick={() => onDisconnect(item.id)}
+                          disabled={actionState.disconnectingItemId === item.id || actionState.syncingItemId === item.id}
+                        >
+                          {actionState.disconnectingItemId === item.id ? '...' : 'Disconnect'}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card operations-table-card">
+        <div className="card-label">BANK ACCOUNTS</div>
+        <h2>Linked Bank Accounts</h2>
+        <div className="positions">
+          <table className="positions-table">
+            <thead>
+              <tr>
+                <SortTh label="Institution" sortKey="institution_name" currentKey={bankSortKey} currentDir={bankSortDir} onSort={bankSort} />
+                <SortTh label="Account" sortKey="name" currentKey={bankSortKey} currentDir={bankSortDir} onSort={bankSort} />
+                <SortTh label="Type" sortKey="type" currentKey={bankSortKey} currentDir={bankSortDir} onSort={bankSort} />
+                <SortTh label="Subtype" sortKey="subtype" currentKey={bankSortKey} currentDir={bankSortDir} onSort={bankSort} />
+                <SortTh label="Balance" sortKey="current_balance" currentKey={bankSortKey} currentDir={bankSortDir} onSort={bankSort} />
+                <SortTh label="Available" sortKey="available_balance" currentKey={bankSortKey} currentDir={bankSortDir} onSort={bankSort} />
+              </tr>
+            </thead>
+            <tbody>
+              {sortedBankAccounts.length === 0 ? (
+                <tr><td colSpan="6" className="empty-state">No bank accounts ingested.</td></tr>
+              ) : (
+                sortedBankAccounts.map((account) => (
+                  <tr key={account.account_id}>
+                    <td>{account.institution_name}</td>
+                    <td>{account.name}{account.mask ? ` ••••${account.mask}` : ''}</td>
+                    <td>{account.type || '--'}</td>
+                    <td>{account.subtype || '--'}</td>
+                    <td>{account.current_balance != null ? formatCurrency(account.current_balance) : '--'}</td>
+                    <td>{account.available_balance != null ? formatCurrency(account.available_balance) : '--'}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card operations-table-card">
+        <div className="card-label">STOCK HOLDINGS</div>
+        <h2>Brokerage Holdings via Plaid</h2>
+        <div className="positions">
+          <table className="positions-table">
+            <thead>
+              <tr>
+                <SortTh label="Institution" sortKey="institution_name" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
+                <SortTh label="Account" sortKey="account_name" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
+                <SortTh label="Symbol" sortKey="symbol" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
+                <SortTh label="Security" sortKey="security_name" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
+                <SortTh label="Qty" sortKey="quantity" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
+                <SortTh label="Price" sortKey="price" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
+                <SortTh label="Value" sortKey="value" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
+                <SortTh label="Cost Basis" sortKey="cost_basis" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
+              </tr>
+            </thead>
+            <tbody>
+              {sortedHoldings.length === 0 ? (
+                <tr><td colSpan="8" className="empty-state">No holdings ingested yet.</td></tr>
+              ) : (
+                sortedHoldings.map((holding) => (
+                  <tr key={holding.id}>
+                    <td>{holding.institution_name}</td>
+                    <td>{holding.account_name}</td>
+                    <td className="symbol-highlight">{holding.symbol || '--'}</td>
+                    <td>{holding.security_name || '--'}</td>
+                    <td>{holding.quantity != null ? Number(holding.quantity).toLocaleString() : '--'}</td>
+                    <td>{holding.price != null ? formatCurrency(holding.price) : '--'}</td>
+                    <td>{holding.value != null ? formatCurrency(holding.value) : '--'}</td>
+                    <td>{holding.cost_basis != null ? formatCurrency(holding.cost_basis) : '--'}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card operations-table-card">
+        <div className="card-label">INVESTMENT TRANSACTIONS</div>
+        <h2>Recent Plaid Investment Activity</h2>
+        <div className="positions">
+          <table className="positions-table">
+            <thead>
+              <tr>
+                <SortTh label="Date" sortKey="date" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
+                <SortTh label="Institution" sortKey="institution_name" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
+                <SortTh label="Symbol" sortKey="symbol" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
+                <SortTh label="Name" sortKey="name" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
+                <SortTh label="Type" sortKey="type" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
+                <SortTh label="Qty" sortKey="quantity" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
+                <SortTh label="Price" sortKey="price" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
+                <SortTh label="Amount" sortKey="amount" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
+              </tr>
+            </thead>
+            <tbody>
+              {sortedTransactions.length === 0 ? (
+                <tr><td colSpan="8" className="empty-state">No investment transactions synced yet.</td></tr>
+              ) : (
+                sortedTransactions.map((tx) => (
+                  <tr key={tx.id}>
+                    <td>{tx.date || '--'}</td>
+                    <td>{tx.institution_name}</td>
+                    <td className="symbol-highlight">{tx.symbol || '--'}</td>
+                    <td>{tx.name || '--'}</td>
+                    <td>{tx.type || '--'}{tx.subtype ? ` / ${tx.subtype}` : ''}</td>
+                    <td>{tx.quantity != null ? Number(tx.quantity).toLocaleString() : '--'}</td>
+                    <td>{tx.price != null ? formatCurrency(tx.price) : '--'}</td>
+                    <td>{tx.amount != null ? formatCurrency(tx.amount) : '--'}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card operations-table-card">
+        <div className="card-label">SYNC LOGS</div>
+        <h2>Manual Sync History</h2>
+        <div className="positions">
+          <table className="positions-table">
+            <thead>
+              <tr>
+                <SortTh label="Time" sortKey="started_at" currentKey={syncSortKey} currentDir={syncSortDir} onSort={syncSort} />
+                <SortTh label="Institution" sortKey="institution_name" currentKey={syncSortKey} currentDir={syncSortDir} onSort={syncSort} />
+                <SortTh label="Status" sortKey="status" currentKey={syncSortKey} currentDir={syncSortDir} onSort={syncSort} />
+                <th>Accounts</th>
+                <th>Holdings</th>
+                <th>Transactions</th>
+                <th>Duration (ms)</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedSyncLogs.length === 0 ? (
+                <tr><td colSpan="8" className="empty-state">No sync logs yet.</td></tr>
+              ) : (
+                sortedSyncLogs.map((log) => (
+                  <tr key={log.id}>
+                    <td>{log.started_at ? new Date(log.started_at).toLocaleString() : '--'}</td>
+                    <td>{log.institution_name || '--'}</td>
+                    <td className={log.status === 'success' ? 'positive' : 'negative'}>{log.status}</td>
+                    <td>{log.accounts_synced ?? 0}</td>
+                    <td>{log.holdings_synced ?? 0}</td>
+                    <td>{log.transactions_synced ?? 0}</td>
+                    <td>{log.duration_ms ?? '--'}</td>
+                    <td>{log.message || '--'}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ============================================================
 // Auth Page Component
 // ============================================================
 function AuthPage({ onAuthSuccess }) {
@@ -1286,6 +1607,20 @@ function App() {
     running: false,
     error: '',
     result: null,
+  });
+  const [plaidData, setPlaidData] = useState(null);
+  const [plaidLoading, setPlaidLoading] = useState(false);
+  const [plaidError, setPlaidError] = useState('');
+  const [plaidLinkState, setPlaidLinkState] = useState({
+    loading: false,
+    mode: '',
+    error: '',
+  });
+  const [plaidActionState, setPlaidActionState] = useState({
+    syncingItemId: null,
+    disconnectingItemId: null,
+    success: '',
+    error: '',
   });
   const profileRef = useRef(null);
 
@@ -1465,6 +1800,137 @@ function App() {
     }
   }, []);
 
+  const fetchPlaidData = useCallback(async () => {
+    setPlaidLoading(true);
+    setPlaidError('');
+    try {
+      const payload = await getPlaidOverview();
+      setPlaidData(payload);
+    } catch (error) {
+      setPlaidError(error.response?.data?.error || 'Failed to load Plaid data');
+    } finally {
+      setPlaidLoading(false);
+    }
+  }, []);
+
+  const handlePlaidConnect = useCallback(async (mode) => {
+    setPlaidLinkState({ loading: true, mode, error: '' });
+    setPlaidActionState((prev) => ({ ...prev, success: '', error: '' }));
+
+    try {
+      const tokenPayload = await createPlaidLinkToken(mode);
+      const linkToken = tokenPayload?.link_token;
+      if (!linkToken) throw new Error('Link token not returned from backend.');
+
+      const Plaid = await loadPlaidScript();
+      if (!Plaid || !Plaid.create) {
+        throw new Error('Plaid Link SDK did not initialize.');
+      }
+
+      await new Promise((resolve, reject) => {
+        let handler = null;
+        const closeHandler = () => {
+          try {
+            if (handler && typeof handler.destroy === 'function') {
+              handler.destroy();
+            }
+          } catch (_) {
+            // no-op
+          }
+        };
+
+        handler = Plaid.create({
+          token: linkToken,
+          onSuccess: async (publicToken, metadata) => {
+            try {
+              await exchangePlaidPublicToken(publicToken, mode, metadata || {});
+              await fetchPlaidData();
+              closeHandler();
+              resolve();
+            } catch (err) {
+              closeHandler();
+              reject(err);
+            }
+          },
+          onExit: (err) => {
+            closeHandler();
+            if (err) {
+              reject(new Error(err.error_message || 'Plaid Link exited with an error.'));
+            } else {
+              resolve();
+            }
+          },
+        });
+        handler.open();
+      });
+
+      setPlaidLinkState({ loading: false, mode: '', error: '' });
+      setPlaidActionState((prev) => ({
+        ...prev,
+        success: 'Plaid item connected and initial sync completed.',
+        error: '',
+      }));
+    } catch (error) {
+      setPlaidLinkState({
+        loading: false,
+        mode: '',
+        error: error.response?.data?.error || error.message || 'Failed to connect Plaid institution',
+      });
+    }
+  }, [fetchPlaidData]);
+
+  const handlePlaidSyncItem = useCallback(async (itemId) => {
+    setPlaidActionState({
+      syncingItemId: itemId,
+      disconnectingItemId: null,
+      success: '',
+      error: '',
+    });
+    try {
+      await syncPlaidItem(itemId);
+      await fetchPlaidData();
+      setPlaidActionState({
+        syncingItemId: null,
+        disconnectingItemId: null,
+        success: 'Manual sync completed.',
+        error: '',
+      });
+    } catch (error) {
+      setPlaidActionState({
+        syncingItemId: null,
+        disconnectingItemId: null,
+        success: '',
+        error: error.response?.data?.error || 'Manual sync failed.',
+      });
+    }
+  }, [fetchPlaidData]);
+
+  const handlePlaidDisconnectItem = useCallback(async (itemId) => {
+    setPlaidActionState({
+      syncingItemId: null,
+      disconnectingItemId: itemId,
+      success: '',
+      error: '',
+    });
+    try {
+      await disconnectPlaidItem(itemId);
+      await fetchPlaidData();
+      setPlaidActionState({
+        syncingItemId: null,
+        disconnectingItemId: null,
+        success: 'Plaid item disconnected.',
+        error: '',
+      });
+    } catch (error) {
+      setPlaidActionState({
+        syncingItemId: null,
+        disconnectingItemId: null,
+        success: '',
+        error: error.response?.data?.error || 'Failed to disconnect item.',
+      });
+    }
+  }, [fetchPlaidData]);
+
   const fetchData = useCallback(async () => {
     try {
       const results = await Promise.allSettled([
@@ -1557,6 +2023,11 @@ function App() {
     const interval = setInterval(fetchOperationsData, 60000);
     return () => clearInterval(interval);
   }, [currentPage, fetchOperationsData]);
+
+  useEffect(() => {
+    if (currentPage !== 'plaid') return;
+    fetchPlaidData();
+  }, [currentPage, fetchPlaidData]);
 
   // Auth loading
   if (!authChecked) {
@@ -1662,6 +2133,16 @@ function App() {
                   >
                     <span>Operations</span>
                   </button>
+                  <button
+                    className="profile-submenu-trigger"
+                    onClick={() => {
+                      setCurrentPage('plaid');
+                      setProfileOpen(false);
+                      setProfileSubmenu(null);
+                    }}
+                  >
+                    <span>Plaid Integrations</span>
+                  </button>
 
                   <button
                     className={`profile-submenu-trigger ${profileSubmenu === 'broker' ? 'open' : ''}`}
@@ -1753,6 +2234,12 @@ function App() {
           onClick={() => setCurrentPage('operations')}
         >
           Operations
+        </button>
+        <button
+          className={`nav-tab ${currentPage === 'plaid' ? 'active' : ''}`}
+          onClick={() => setCurrentPage('plaid')}
+        >
+          Plaid
         </button>
       </nav>
 
@@ -2009,6 +2496,19 @@ function App() {
           analyzeLogsError={analyzeLogsError}
           onExportAnalyzeLogs={handleExportAnalyzeLogs}
           exportLogsState={exportLogsState}
+        />
+      )}
+      {currentPage === 'plaid' && (
+        <PlaidPage
+          data={plaidData}
+          loading={plaidLoading}
+          error={plaidError}
+          linkState={plaidLinkState}
+          actionState={plaidActionState}
+          onRefresh={fetchPlaidData}
+          onConnect={handlePlaidConnect}
+          onManualSync={handlePlaidSyncItem}
+          onDisconnect={handlePlaidDisconnectItem}
         />
       )}
     </div>

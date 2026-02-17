@@ -26,6 +26,13 @@ urlpatterns = [
     path('agent-status', api.AgentStatusView.as_view(), name='api-agent-status'),
     path('operations-summary', api.OperationsSummaryView.as_view(), name='api-operations-summary'),
     path('analyze-logs', api.AnalyzeLogsView.as_view(), name='api-analyze-logs'),
+
+    # Plaid read-only integrations (manual sync only)
+    path('plaid/overview', api.PlaidOverviewView.as_view(), name='api-plaid-overview'),
+    path('plaid/link-token', api.PlaidLinkTokenView.as_view(), name='api-plaid-link-token'),
+    path('plaid/exchange-token', api.PlaidExchangeTokenView.as_view(), name='api-plaid-exchange-token'),
+    path('plaid/items/<int:item_id>/sync', api.PlaidItemSyncView.as_view(), name='api-plaid-item-sync'),
+    path('plaid/items/<int:item_id>/disconnect', api.PlaidItemDisconnectView.as_view(), name='api-plaid-item-disconnect'),
     
     # Trading configuration
     path('config', api.ConfigView.as_view(), name='api-config'),

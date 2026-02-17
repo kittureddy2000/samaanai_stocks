@@ -1697,6 +1697,297 @@ class AnalyzeLogsView(APIView):
             return Response({'error': str(e)}, status=500)
 
 
+class PlaidLinkTokenView(APIView):
+    """Create Plaid Link token for client-side Link flow."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from trading_api.services.plaid_service import PlaidClient, PlaidServiceError
+
+        mode = (request.data.get('mode') or 'investments').strip().lower()
+        client = PlaidClient()
+        if not client.is_configured:
+            return Response({
+                'error': 'Plaid credentials are not configured on the backend.',
+            }, status=500)
+
+        try:
+            payload = client.create_link_token(user_id=str(request.user.id), mode=mode)
+            return Response({
+                'link_token': payload.get('link_token'),
+                'expiration': payload.get('expiration'),
+                'request_id': payload.get('request_id'),
+                'mode': mode,
+                'env': client.env,
+            })
+        except PlaidServiceError as exc:
+            return Response({
+                'error': exc.info.message,
+                'error_code': exc.info.error_code,
+                'error_type': exc.info.error_type,
+                'request_id': exc.info.request_id,
+            }, status=400)
+
+
+class PlaidExchangeTokenView(APIView):
+    """Exchange Plaid public token, persist item, and perform initial sync."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from trading_api.models import PlaidItem
+        from trading_api.services.plaid_service import PlaidClient, PlaidServiceError, sync_item_data
+
+        public_token = (request.data.get('public_token') or '').strip()
+        mode = (request.data.get('mode') or 'investments').strip().lower()
+        if not public_token:
+            return Response({'error': 'public_token is required.'}, status=400)
+        if mode not in {'investments', 'bank'}:
+            mode = 'investments'
+
+        client = PlaidClient()
+        try:
+            exchange = client.exchange_public_token(public_token)
+            access_token = exchange.get('access_token')
+            item_id = exchange.get('item_id')
+            if not access_token or not item_id:
+                return Response({'error': 'Plaid exchange response missing item token.'}, status=502)
+
+            item_payload = client.get_item(access_token).get('item') or {}
+            institution_id = item_payload.get('institution_id') or ''
+            institution_name = client.get_institution_name(institution_id) if institution_id else ''
+            consent_exp = item_payload.get('consent_expiration_time')
+            consent_exp_dt = None
+            if consent_exp:
+                try:
+                    consent_exp_dt = timezone.datetime.fromisoformat(str(consent_exp).replace('Z', '+00:00'))
+                except Exception:
+                    consent_exp_dt = None
+
+            existing = PlaidItem.objects.filter(item_id=item_id).first()
+            if existing and existing.user_id != request.user.id:
+                return Response({
+                    'error': 'This Plaid item is already linked to another user.',
+                }, status=409)
+
+            plaid_item, _ = PlaidItem.objects.update_or_create(
+                item_id=item_id,
+                defaults={
+                    'user': request.user,
+                    'access_token': access_token,
+                    'institution_id': institution_id,
+                    'institution_name': institution_name,
+                    'product_type': mode,
+                    'status': 'active',
+                    'last_error': '',
+                    'consent_expiration_time': consent_exp_dt,
+                },
+            )
+
+            sync_result = sync_item_data(plaid_item, triggered_by=request.user)
+
+            return Response({
+                'success': True,
+                'item': {
+                    'id': plaid_item.id,
+                    'item_id': plaid_item.item_id,
+                    'institution_name': plaid_item.institution_name,
+                    'product_type': plaid_item.product_type,
+                    'status': plaid_item.status,
+                    'last_sync_at': timezone.localtime(plaid_item.last_sync_at).isoformat()
+                    if plaid_item.last_sync_at else None,
+                },
+                'sync': sync_result,
+            })
+
+        except PlaidServiceError as exc:
+            return Response({
+                'error': exc.info.message,
+                'error_code': exc.info.error_code,
+                'error_type': exc.info.error_type,
+                'request_id': exc.info.request_id,
+            }, status=400)
+        except Exception as exc:
+            logger.exception('Plaid token exchange failed')
+            return Response({'error': str(exc)}, status=500)
+
+
+class PlaidOverviewView(APIView):
+    """Return connected Plaid items with accounts/holdings/transactions."""
+
+    permission_classes = [IsAuthenticated]
+
+    @staticmethod
+    def _serialize_account(account):
+        return {
+            'id': account.id,
+            'account_id': account.account_id,
+            'name': account.name,
+            'official_name': account.official_name,
+            'mask': account.mask,
+            'type': account.account_type,
+            'subtype': account.subtype,
+            'current_balance': float(account.current_balance) if account.current_balance is not None else None,
+            'available_balance': float(account.available_balance) if account.available_balance is not None else None,
+            'currency': account.iso_currency_code or account.unofficial_currency_code or 'USD',
+            'last_sync_at': timezone.localtime(account.last_sync_at).isoformat()
+            if account.last_sync_at else None,
+        }
+
+    @staticmethod
+    def _serialize_item(item):
+        accounts = [PlaidOverviewView._serialize_account(acc) for acc in item.accounts.all().order_by('name')]
+        return {
+            'id': item.id,
+            'item_id': item.item_id,
+            'institution_name': item.institution_name or item.institution_id or item.item_id,
+            'institution_id': item.institution_id,
+            'product_type': item.product_type,
+            'status': item.status,
+            'last_error': item.last_error,
+            'last_sync_at': timezone.localtime(item.last_sync_at).isoformat() if item.last_sync_at else None,
+            'last_success_at': timezone.localtime(item.last_success_at).isoformat() if item.last_success_at else None,
+            'accounts': accounts,
+            'counts': {
+                'accounts': len(accounts),
+                'holdings': item.holdings.count(),
+                'transactions': item.investment_transactions.count(),
+            },
+        }
+
+    def get(self, request):
+        from trading_api.models import PlaidHolding, PlaidInvestmentTransaction, PlaidItem, PlaidSyncLog
+        from trading_api.services.plaid_service import PlaidClient
+
+        limit_holdings = max(1, min(int(request.query_params.get('holdings_limit', 200) or 200), 1000))
+        limit_transactions = max(1, min(int(request.query_params.get('transactions_limit', 200) or 200), 1000))
+        limit_logs = max(1, min(int(request.query_params.get('logs_limit', 50) or 50), 200))
+
+        items_qs = PlaidItem.objects.filter(user=request.user).prefetch_related('accounts', 'holdings', 'investment_transactions')
+        items = [self._serialize_item(item) for item in items_qs]
+
+        holdings_qs = PlaidHolding.objects.filter(item__user=request.user).select_related(
+            'item', 'account', 'security'
+        ).order_by('-institution_value', '-updated_at')[:limit_holdings]
+        holdings = [{
+            'id': h.id,
+            'institution_name': h.item.institution_name or h.item.institution_id or h.item.item_id,
+            'account_name': h.account.name or h.account.account_id,
+            'symbol': (h.security.ticker_symbol if h.security else '') or '',
+            'security_name': (h.security.name if h.security else '') or '',
+            'quantity': float(h.quantity) if h.quantity is not None else None,
+            'price': float(h.institution_price) if h.institution_price is not None else None,
+            'value': float(h.institution_value) if h.institution_value is not None else None,
+            'cost_basis': float(h.cost_basis) if h.cost_basis is not None else None,
+            'currency': h.iso_currency_code or h.unofficial_currency_code or 'USD',
+            'updated_at': timezone.localtime(h.updated_at).isoformat(),
+        } for h in holdings_qs]
+
+        transactions_qs = PlaidInvestmentTransaction.objects.filter(item__user=request.user).select_related(
+            'item', 'account', 'security'
+        ).order_by('-date', '-updated_at')[:limit_transactions]
+        transactions = [{
+            'id': tx.id,
+            'institution_name': tx.item.institution_name or tx.item.institution_id or tx.item.item_id,
+            'date': tx.date.isoformat() if tx.date else None,
+            'name': tx.name,
+            'symbol': tx.ticker_symbol or (tx.security.ticker_symbol if tx.security else ''),
+            'type': tx.tx_type,
+            'subtype': tx.subtype,
+            'quantity': float(tx.quantity) if tx.quantity is not None else None,
+            'price': float(tx.price) if tx.price is not None else None,
+            'amount': float(tx.amount) if tx.amount is not None else None,
+            'fees': float(tx.fees) if tx.fees is not None else None,
+            'currency': tx.iso_currency_code or tx.unofficial_currency_code or 'USD',
+            'account_name': tx.account.name if tx.account else '',
+            'updated_at': timezone.localtime(tx.updated_at).isoformat(),
+        } for tx in transactions_qs]
+
+        logs_qs = PlaidSyncLog.objects.filter(item__user=request.user).select_related('item').order_by('-started_at')[:limit_logs]
+        sync_logs = [{
+            'id': log.id,
+            'institution_name': log.item.institution_name if log.item else '',
+            'status': log.status,
+            'message': log.message,
+            'accounts_synced': log.accounts_synced,
+            'holdings_synced': log.holdings_synced,
+            'transactions_synced': log.transactions_synced,
+            'started_at': timezone.localtime(log.started_at).isoformat() if log.started_at else None,
+            'ended_at': timezone.localtime(log.ended_at).isoformat() if log.ended_at else None,
+            'duration_ms': log.duration_ms,
+            'details': log.details or {},
+        } for log in logs_qs]
+
+        client = PlaidClient()
+        return Response({
+            'configured': client.is_configured,
+            'env': client.env,
+            'manual_sync_only': True,
+            'items': items,
+            'holdings': holdings,
+            'transactions': transactions,
+            'sync_logs': sync_logs,
+        })
+
+
+class PlaidItemSyncView(APIView):
+    """Trigger manual sync for one Plaid item."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, item_id):
+        from trading_api.models import PlaidItem
+        from trading_api.services.plaid_service import PlaidServiceError, sync_item_data
+
+        try:
+            item = PlaidItem.objects.get(id=item_id, user=request.user)
+        except PlaidItem.DoesNotExist:
+            return Response({'error': 'Plaid item not found.'}, status=404)
+
+        try:
+            result = sync_item_data(item, triggered_by=request.user)
+            return Response({
+                'success': True,
+                'item_id': item.id,
+                'result': result,
+            })
+        except PlaidServiceError as exc:
+            return Response({
+                'error': exc.info.message,
+                'error_code': exc.info.error_code,
+                'error_type': exc.info.error_type,
+            }, status=400)
+        except Exception as exc:
+            logger.exception('Plaid manual sync failed')
+            return Response({'error': str(exc)}, status=500)
+
+
+class PlaidItemDisconnectView(APIView):
+    """Disconnect Plaid item and delete cached data."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, item_id):
+        from trading_api.models import PlaidItem
+        from trading_api.services.plaid_service import PlaidClient
+
+        try:
+            item = PlaidItem.objects.get(id=item_id, user=request.user)
+        except PlaidItem.DoesNotExist:
+            return Response({'error': 'Plaid item not found.'}, status=404)
+
+        client = PlaidClient()
+        if client.is_configured:
+            try:
+                client.remove_item(item.access_token)
+            except Exception as exc:
+                logger.warning(f'Plaid item remove call failed for {item.item_id}: {exc}')
+
+        item.delete()
+        return Response({'success': True})
+
+
 class ConfigView(APIView):
     """Get trading configuration."""
 

@@ -230,6 +230,35 @@ export const getCollarStrategy = async (symbol, upsidePct) => {
     return response.data;
 };
 
+export const getPlaidOverview = async () => {
+    const response = await api.get('/api/plaid/overview');
+    return response.data;
+};
+
+export const createPlaidLinkToken = async (mode = 'investments') => {
+    const response = await api.post('/api/plaid/link-token', { mode });
+    return response.data;
+};
+
+export const exchangePlaidPublicToken = async (publicToken, mode, metadata = {}) => {
+    const response = await api.post('/api/plaid/exchange-token', {
+        public_token: publicToken,
+        mode,
+        metadata,
+    });
+    return response.data;
+};
+
+export const syncPlaidItem = async (itemId) => {
+    const response = await api.post(`/api/plaid/items/${itemId}/sync`, {});
+    return response.data;
+};
+
+export const disconnectPlaidItem = async (itemId) => {
+    const response = await api.post(`/api/plaid/items/${itemId}/disconnect`, {});
+    return response.data;
+};
+
 export const addToWatchlist = async (symbol) => {
     const response = await api.post('/api/watchlist', { symbol });
     return response.data;
