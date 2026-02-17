@@ -50,6 +50,7 @@ jobs:
             --add-cloudsql-instances=samaanai-stg-1009-124126:us-west1:samaanai-backend-staging-db
             --vpc-connector=ibkr-connector
             --vpc-egress=private-ranges-only
+            --set-secrets=PLAID_CLIENT_ID=TRADING_PLAID_CLIENT_ID:latest,PLAID_SECRET=TRADING_PLAID_SECRET:latest
           env_vars: |
             DJANGO_SETTINGS_MODULE=backend.settings.production
             DJANGO_SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}
