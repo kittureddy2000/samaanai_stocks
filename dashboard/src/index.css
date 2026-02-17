@@ -295,6 +295,41 @@ body {
   gap: 8px;
 }
 
+.risk-market-strip {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.risk-market-chip {
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.risk-market-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.risk-market-price {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.risk-market-change {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
 /* Watchlist Card — full width table */
 .watchlist-card {
   grid-column: span 2;
@@ -565,6 +600,14 @@ td {
   }
 
   .portfolio-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .risk-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .risk-market-strip {
     grid-template-columns: 1fr;
   }
 

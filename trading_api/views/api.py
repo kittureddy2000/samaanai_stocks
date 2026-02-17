@@ -9,10 +9,12 @@ import os
 import time
 import threading
 import csv
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
 from django.conf import settings
 from django.http import HttpResponse
+from django.db.models import Q
+from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -36,6 +38,19 @@ _position_metrics_cache = {
     'results': {},
 }
 _position_metrics_cache_lock = threading.Lock()
+
+_MARKET_INDICES_CACHE_TTL_SECONDS = 30
+_market_indices_cache = {
+    'timestamp': 0.0,
+    'results': {},
+}
+_market_indices_cache_lock = threading.Lock()
+
+MARKET_INDEX_CONFIG = {
+    'sp500': {'symbol': '^GSPC', 'label': 'S&P 500'},
+    'nasdaq': {'symbol': '^IXIC', 'label': 'Nasdaq'},
+    'vix': {'symbol': '^VIX', 'label': 'VIX'},
+}
 
 INDICATOR_LABELS = {
     'rsi': 'RSI',
@@ -235,6 +250,121 @@ def _safe_float(value):
     if result == float('inf') or result == float('-inf'):
         return None
     return result
+
+
+def _as_local_date(value):
+    """Best-effort conversion of broker timestamp values to local date."""
+    if value is None:
+        return None
+
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        dt = parse_datetime(text.replace('Z', '+00:00'))
+        if dt is None:
+            try:
+                dt = datetime.fromisoformat(text.replace('Z', '+00:00'))
+            except ValueError:
+                return None
+
+    if timezone.is_naive(dt):
+        dt = timezone.make_aware(dt, timezone.get_default_timezone())
+    return timezone.localtime(dt).date()
+
+
+def _count_today_executed_orders(orders):
+    """Count filled/executed broker orders for current local date."""
+    today = timezone.localdate()
+    count = 0
+    for order in orders or []:
+        status = str(order.get('status', '')).lower()
+        status = status.replace('orderstatus.', '').replace('order_status.', '')
+        if status not in {'filled', 'executed'}:
+            continue
+        created_at = order.get('created_at')
+        if _as_local_date(created_at) == today:
+            count += 1
+    return count
+
+
+def get_market_indices_snapshot():
+    """Fetch S&P 500, Nasdaq and VIX snapshot with short caching."""
+    now = time.time()
+    with _market_indices_cache_lock:
+        age = now - _market_indices_cache['timestamp']
+        if _market_indices_cache['results'] and age < _MARKET_INDICES_CACHE_TTL_SECONDS:
+            return _market_indices_cache['results']
+
+    results = {}
+    try:
+        import yfinance as yf
+    except Exception as exc:
+        logger.warning(f"Market indices fetch unavailable (yfinance import): {exc}")
+        return results
+
+    for key, cfg in MARKET_INDEX_CONFIG.items():
+        symbol = cfg['symbol']
+        label = cfg['label']
+        price = None
+        prev_close = None
+
+        try:
+            ticker = yf.Ticker(symbol)
+
+            try:
+                fast = getattr(ticker, 'fast_info', {}) or {}
+                price = _safe_float(
+                    fast.get('lastPrice')
+                    or fast.get('last_price')
+                    or fast.get('regularMarketPrice')
+                )
+                prev_close = _safe_float(
+                    fast.get('previousClose')
+                    or fast.get('previous_close')
+                )
+            except Exception:
+                pass
+
+            # Fallback to daily history if fast_info is unavailable.
+            if price is None or prev_close is None:
+                hist = ticker.history(period='5d', interval='1d', auto_adjust=False)
+                if not hist.empty and 'Close' in hist.columns:
+                    closes = hist['Close'].dropna()
+                    if not closes.empty:
+                        if price is None:
+                            price = _safe_float(closes.iloc[-1])
+                        if prev_close is None:
+                            if len(closes) >= 2:
+                                prev_close = _safe_float(closes.iloc[-2])
+                            else:
+                                prev_close = _safe_float(closes.iloc[-1])
+
+            if price is None:
+                continue
+
+            change = None
+            change_pct = None
+            if prev_close not in (None, 0):
+                change = price - prev_close
+                change_pct = (change / prev_close) * 100
+
+            results[key] = {
+                'symbol': symbol,
+                'label': label,
+                'price': price,
+                'change': change,
+                'change_pct': change_pct,
+            }
+        except Exception as exc:
+            logger.warning(f"Failed to fetch market index {symbol}: {exc}")
+
+    with _market_indices_cache_lock:
+        _market_indices_cache['timestamp'] = now
+        _market_indices_cache['results'] = results
+    return results
 
 
 def _extract_close_series(downloaded, symbol, symbols):
@@ -1071,6 +1201,8 @@ class RiskView(APIView):
         start_time = time.time()
         logger.info("RiskView.get called")
         try:
+            from trading_api.models import Trade
+
             trading_client = get_trading_client()
             apply_runtime_trading_settings()
             risk_manager = get_risk_manager()
@@ -1086,11 +1218,35 @@ class RiskView(APIView):
                     'max_position_value': 0,
                     'kill_switch_active': False,
                     'broker_connected': False,
+                    'market_indices': get_market_indices_snapshot(),
                     'error': 'Broker not connected',
                 })
 
             risk_status = risk_manager.get_risk_status(account)
             risk_status['broker_connected'] = True
+
+            # Daily trade counts should not rely on in-memory counters only.
+            today = timezone.localdate()
+            daily_trades_db = Trade.objects.filter(
+                Q(executed_at__date=today) | Q(executed_at__isnull=True, created_at__date=today),
+                status__in=['filled', 'executed'],
+            ).count()
+
+            daily_trades_broker = 0
+            try:
+                orders = trading_client.get_orders_history(limit=300)
+                if orders:
+                    sync_trades_to_db(orders, user=request.user)
+                daily_trades_broker = _count_today_executed_orders(orders)
+            except Exception as broker_exc:
+                logger.warning(f"RiskView.get broker order count failed: {broker_exc}")
+
+            risk_status['daily_trades'] = max(
+                int(risk_status.get('daily_trades') or 0),
+                int(daily_trades_db or 0),
+                int(daily_trades_broker or 0),
+            )
+            risk_status['market_indices'] = get_market_indices_snapshot()
 
             elapsed = time.time() - start_time
             logger.info(
@@ -1108,6 +1264,7 @@ class RiskView(APIView):
                 'max_position_value': 0,
                 'kill_switch_active': False,
                 'broker_connected': False,
+                'market_indices': get_market_indices_snapshot(),
                 'error': str(e),
             })
 

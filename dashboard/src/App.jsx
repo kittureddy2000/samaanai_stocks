@@ -2077,6 +2077,24 @@ function App() {
     : 'No recent executions';
   const ibkrConnected = config?.broker === 'ibkr' && config?.ibkr_connection_test === 'success';
   const ibkrStatusText = ibkrConnected ? 'IBKR Connected' : 'IBKR Connection Issue';
+  const riskIndices = risk?.market_indices || {};
+  const riskIndexCards = [
+    { key: 'sp500', fallbackLabel: 'S&P 500' },
+    { key: 'nasdaq', fallbackLabel: 'Nasdaq' },
+    { key: 'vix', fallbackLabel: 'VIX' },
+  ].map(({ key, fallbackLabel }) => {
+    const item = riskIndices?.[key] || {};
+    const change = Number(item.change);
+    const changePct = Number(item.change_pct);
+    return {
+      key,
+      label: item.label || fallbackLabel,
+      price: item.price,
+      change,
+      changePct,
+      hasChange: Number.isFinite(change) && Number.isFinite(changePct),
+    };
+  });
 
   return (
     <div className="dashboard">
@@ -2300,6 +2318,19 @@ function App() {
                   <span className="label">Kill Switch</span>
                   <span className="value">{risk?.kill_switch_active ? 'Active' : 'Inactive'}</span>
                 </div>
+              </div>
+              <div className="risk-market-strip">
+                {riskIndexCards.map((idx) => (
+                  <div key={idx.key} className="risk-market-chip">
+                    <span className="risk-market-label">{idx.label}</span>
+                    <span className="risk-market-price">
+                      {Number.isFinite(Number(idx.price)) ? formatCurrency(Number(idx.price)) : '--'}
+                    </span>
+                    <span className={`risk-market-change ${idx.hasChange ? (idx.change >= 0 ? 'positive' : 'negative') : ''}`}>
+                      {idx.hasChange ? `${idx.change >= 0 ? '+' : ''}${idx.change.toFixed(2)} (${idx.changePct >= 0 ? '+' : ''}${idx.changePct.toFixed(2)}%)` : '--'}
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
 
