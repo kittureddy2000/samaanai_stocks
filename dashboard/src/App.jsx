@@ -71,6 +71,20 @@ const formatCurrencyOrDash = (value) => {
   return Number.isFinite(n) ? formatCurrency(n) : '--';
 };
 
+const formatWholeCurrency = (value) => {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(value);
+};
+
+const formatWholeCurrencyOrDash = (value) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? formatWholeCurrency(n) : '--';
+};
+
 const computePremiumPct = (premium, underlyingPrice) => {
   const p = Number(premium);
   const u = Number(underlyingPrice);
@@ -1168,6 +1182,25 @@ function PlaidPage({
   const [plaidTab, setPlaidTab] = useState('holdings');
   const [holdingsQuery, setHoldingsQuery] = useState('');
   const [holdingsAssetFilter, setHoldingsAssetFilter] = useState('all');
+  const [holdingsAccountFilter, setHoldingsAccountFilter] = useState('all');
+  const [dragColumnKey, setDragColumnKey] = useState('');
+  const [holdingsColumnOrder, setHoldingsColumnOrder] = useState([
+    'institution_name',
+    'symbol',
+    'quantity',
+    'price',
+    'cost_basis_per_share',
+    'value',
+    'total_gain_value',
+    'total_gain_pct',
+    'change_pct',
+    'forward_pe',
+    'volatility_pct',
+    'week_52_high',
+    'week_52_low',
+    'ytd_gain_pct',
+    'option_type',
+  ]);
 
   const items = data?.items || [];
   const holdings = data?.holdings || [];
@@ -1189,6 +1222,15 @@ function PlaidPage({
   const { sorted: sortedTransactions, sortKey: txSortKey, sortDir: txSortDir, handleSort: txSort } = useSortableTable(transactions, 'date');
   const { sorted: sortedSyncLogs, sortKey: syncSortKey, sortDir: syncSortDir, handleSort: syncSort } = useSortableTable(syncLogs, 'started_at');
   const query = holdingsQuery.trim().toLowerCase();
+
+  const accountFilterOptions = useMemo(() => {
+    const unique = Array.from(new Set(
+      holdings
+        .map((holding) => String(holding.account_name || '').trim())
+        .filter(Boolean)
+    ));
+    return unique.sort((a, b) => a.localeCompare(b));
+  }, [holdings]);
 
   const classifyHoldingAsset = (holding) => {
     const optionType = String(holding.option_type || '').toLowerCase();
@@ -1212,6 +1254,9 @@ function PlaidPage({
       const assetClass = classifyHoldingAsset(holding);
       if (holdingsAssetFilter === 'stocks' && assetClass !== 'stocks') return false;
       if (holdingsAssetFilter === 'options' && assetClass !== 'options') return false;
+      if (holdingsAccountFilter !== 'all' && String(holding.account_name || '') !== holdingsAccountFilter) {
+        return false;
+      }
 
       if (!query) return true;
       const haystack = [
@@ -1220,52 +1265,148 @@ function PlaidPage({
         holding.institution_name,
         holding.metric_symbol,
         holding.option_type,
+        holding.account_name,
       ].join(' ').toLowerCase();
       return haystack.includes(query);
     });
-  }, [sortedHoldings, holdingsAssetFilter, query]);
+  }, [sortedHoldings, holdingsAssetFilter, holdingsAccountFilter, query]);
 
   const stockCount = holdings.filter((h) => classifyHoldingAsset(h) === 'stocks').length;
   const optionCount = holdings.filter((h) => classifyHoldingAsset(h) === 'options').length;
+  const connectedBrokerages = items.filter((item) => item.product_type === 'investments').length;
 
   const formatRatio = (value) => {
     const n = Number(value);
     return Number.isFinite(n) ? n.toFixed(2) : '--';
   };
 
+  const getTotalGainValue = (holding) => {
+    const value = Number(holding.value);
+    const basis = Number(holding.cost_basis);
+    if (!Number.isFinite(value) || !Number.isFinite(basis)) return null;
+    return value - basis;
+  };
+
+  const holdingColumnDefs = useMemo(() => ({
+    institution_name: {
+      label: 'Institution',
+      sortKey: 'institution_name',
+      render: (holding) => ({ content: holding.institution_name || '--', className: '' }),
+    },
+    symbol: {
+      label: 'Symbol',
+      sortKey: 'symbol',
+      render: (holding) => ({ content: holding.symbol || holding.metric_symbol || '--', className: 'symbol-highlight' }),
+    },
+    quantity: {
+      label: 'Qty',
+      sortKey: 'quantity',
+      render: (holding) => ({
+        content: holding.quantity != null ? Number(holding.quantity).toLocaleString() : '--',
+        className: '',
+      }),
+    },
+    price: {
+      label: 'Price',
+      sortKey: 'price',
+      render: (holding) => ({ content: formatCurrencyOrDash(holding.price), className: '' }),
+    },
+    cost_basis_per_share: {
+      label: 'Cost Basis',
+      sortKey: 'cost_basis_per_share',
+      render: (holding) => ({ content: formatWholeCurrencyOrDash(holding.cost_basis_per_share), className: '' }),
+    },
+    value: {
+      label: 'Value',
+      sortKey: 'value',
+      render: (holding) => ({ content: formatWholeCurrencyOrDash(holding.value), className: '' }),
+    },
+    total_gain_value: {
+      label: 'Total Gain $',
+      sortKey: 'total_gain_value',
+      render: (holding) => {
+        const gain = getTotalGainValue(holding);
+        return {
+          content: formatWholeCurrencyOrDash(gain),
+          className: (gain ?? 0) >= 0 ? 'positive' : 'negative',
+        };
+      },
+    },
+    total_gain_pct: {
+      label: '% Total Gain',
+      sortKey: 'total_gain_pct',
+      render: (holding) => ({
+        content: formatPercentOrDash(holding.total_gain_pct),
+        className: (holding.total_gain_pct ?? 0) >= 0 ? 'positive' : 'negative',
+      }),
+    },
+    change_pct: {
+      label: '% Change',
+      sortKey: 'change_pct',
+      render: (holding) => ({
+        content: formatPercentOrDash(holding.change_pct),
+        className: (holding.change_pct ?? 0) >= 0 ? 'positive' : 'negative',
+      }),
+    },
+    forward_pe: {
+      label: 'Forward P/E',
+      sortKey: 'forward_pe',
+      render: (holding) => ({ content: formatRatio(holding.forward_pe), className: '' }),
+    },
+    volatility_pct: {
+      label: 'Volatility',
+      sortKey: 'volatility_pct',
+      render: (holding) => ({ content: formatPercentOrDash(holding.volatility_pct), className: '' }),
+    },
+    week_52_high: {
+      label: '52W High',
+      sortKey: 'week_52_high',
+      render: (holding) => ({ content: formatCurrencyOrDash(holding.week_52_high), className: '' }),
+    },
+    week_52_low: {
+      label: '52W Low',
+      sortKey: 'week_52_low',
+      render: (holding) => ({ content: formatCurrencyOrDash(holding.week_52_low), className: '' }),
+    },
+    ytd_gain_pct: {
+      label: 'YTD Gain %',
+      sortKey: 'ytd_gain_pct',
+      render: (holding) => ({
+        content: formatPercentOrDash(holding.ytd_gain_pct),
+        className: (holding.ytd_gain_pct ?? 0) >= 0 ? 'positive' : 'negative',
+      }),
+    },
+    option_type: {
+      label: 'Option Type',
+      sortKey: 'option_type',
+      render: (holding) => ({ content: holding.option_type || '--', className: '' }),
+    },
+  }), []);
+
+  const orderedHoldingColumns = holdingsColumnOrder.filter((key) => holdingColumnDefs[key]);
+
+  const handleColumnDrop = (targetKey) => {
+    if (!dragColumnKey || dragColumnKey === targetKey) return;
+    setHoldingsColumnOrder((prev) => {
+      const sourceIndex = prev.indexOf(dragColumnKey);
+      const targetIndex = prev.indexOf(targetKey);
+      if (sourceIndex < 0 || targetIndex < 0) return prev;
+      const next = [...prev];
+      next.splice(sourceIndex, 1);
+      next.splice(targetIndex, 0, dragColumnKey);
+      return next;
+    });
+    setDragColumnKey('');
+  };
+
   return (
     <div className="plaid-page">
-      <div className="dash-header-row">
-        <div>
-          <div className="dash-label">PLAID INTEGRATIONS</div>
-          <h2 className="dash-title">Brokerage Holdings via Plaid</h2>
-          <p className="dash-subtitle">
-            Read-only ingestion for trading decisions. No portfolio merge. Manual sync only.
-          </p>
-        </div>
-        <div className="operations-actions">
-          {plaidTab === 'connections' && (
-            <>
-              <button className="btn-refresh" onClick={() => onConnect('investments')} disabled={linkState.loading}>
-                {linkState.loading && linkState.mode === 'investments' ? 'Connecting...' : 'Connect Brokerage'}
-              </button>
-              <button className="btn-refresh" onClick={() => onConnect('bank')} disabled={linkState.loading}>
-                {linkState.loading && linkState.mode === 'bank' ? 'Connecting...' : 'Connect Bank'}
-              </button>
-            </>
-          )}
-          <button className="btn-refresh" onClick={onRefresh} disabled={loading}>
-            {loading ? 'Refreshing...' : 'Refresh'}
-          </button>
-        </div>
-      </div>
-
       <div className="nav-tabs plaid-subtabs">
         <button
           className={`nav-tab ${plaidTab === 'holdings' ? 'active' : ''}`}
           onClick={() => setPlaidTab('holdings')}
         >
-          Brokerage Holdings
+          Holdings
         </button>
         <button
           className={`nav-tab ${plaidTab === 'connections' ? 'active' : ''}`}
@@ -1282,28 +1423,16 @@ function PlaidPage({
 
       {plaidTab === 'holdings' && (
         <>
-          <div className="main-grid operations-grid">
-            <div className="card">
-              <div className="card-label">MARKET SNAPSHOT</div>
-              <h2>Brokerage Holdings Coverage</h2>
-              <div className="operations-stat-row"><span>Total Holdings</span><strong>{holdings.length}</strong></div>
-              <div className="operations-stat-row"><span>Stocks</span><strong>{stockCount}</strong></div>
-              <div className="operations-stat-row"><span>Options</span><strong>{optionCount}</strong></div>
-              <div className="operations-stat-row"><span>Connected Brokerages</span><strong>{items.filter((item) => item.product_type === 'investments').length}</strong></div>
-            </div>
-            <div className="card">
-              <div className="card-label">PLAID STATUS</div>
-              <h2>Data Feed</h2>
-              <div className="operations-stat-row"><span>Configured</span><strong>{data?.configured ? 'Yes' : 'No'}</strong></div>
-              <div className="operations-stat-row"><span>Environment</span><strong>{data?.env || '--'}</strong></div>
-              <div className="operations-stat-row"><span>Manual Sync</span><strong>{data?.manual_sync_only ? 'Enabled' : 'No'}</strong></div>
-              <div className="operations-stat-row"><span>Last Sync Logs</span><strong>{syncLogs.length}</strong></div>
-            </div>
-          </div>
-
           <div className="card operations-table-card">
-            <div className="card-label">STOCK HOLDINGS</div>
-            <h2>Brokerage Holdings via Plaid</h2>
+            <div className="operations-table-header">
+              <div>
+                <div className="card-label">STOCK HOLDINGS</div>
+                <h2>Brokerage Holdings via Plaid</h2>
+              </div>
+              <button className="btn-refresh" onClick={onRefresh} disabled={loading}>
+                {loading ? 'Refreshing...' : 'Refresh'}
+              </button>
+            </div>
             <div className="plaid-holdings-toolbar">
               <input
                 className="plaid-filter-input"
@@ -1312,6 +1441,18 @@ function PlaidPage({
                 onChange={(event) => setHoldingsQuery(event.target.value)}
                 placeholder="Filter by symbol, underlying, institution..."
               />
+              <select
+                className="plaid-account-filter"
+                value={holdingsAccountFilter}
+                onChange={(event) => setHoldingsAccountFilter(event.target.value)}
+              >
+                <option value="all">All Accounts</option>
+                {accountFilterOptions.map((accountName) => (
+                  <option key={accountName} value={accountName}>
+                    {accountName}
+                  </option>
+                ))}
+              </select>
               <div className="plaid-filter-group">
                 <button
                   className={`plaid-filter-chip ${holdingsAssetFilter === 'all' ? 'active' : ''}`}
@@ -1337,48 +1478,38 @@ function PlaidPage({
               <table className="positions-table">
                 <thead>
                   <tr>
-                    <SortTh label="Institution" sortKey="institution_name" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
-                    <SortTh label="Symbol" sortKey="symbol" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
-                    <SortTh label="Qty" sortKey="quantity" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
-                    <SortTh label="Price" sortKey="price" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
-                    <SortTh label="Value" sortKey="value" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
-                    <SortTh label="Cost Basis" sortKey="cost_basis" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
-                    <SortTh label="Cost Basis/Share" sortKey="cost_basis_per_share" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
-                    <SortTh label="% Total Gain" sortKey="total_gain_pct" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
-                    <SortTh label="% Change" sortKey="change_pct" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
-                    <SortTh label="Option Type" sortKey="option_type" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
-                    <SortTh label="Forward P/E" sortKey="forward_pe" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
-                    <SortTh label="52W High" sortKey="week_52_high" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
-                    <SortTh label="52W Low" sortKey="week_52_low" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
-                    <SortTh label="YTD Gain %" sortKey="ytd_gain_pct" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
+                    {orderedHoldingColumns.map((columnKey) => {
+                      const col = holdingColumnDefs[columnKey];
+                      const active = holdSortKey === col.sortKey;
+                      return (
+                        <th
+                          key={columnKey}
+                          className={`sortable-th draggable-th ${dragColumnKey === columnKey ? 'dragging' : ''}`}
+                          onClick={() => holdSort(col.sortKey)}
+                          draggable
+                          onDragStart={() => setDragColumnKey(columnKey)}
+                          onDragOver={(event) => event.preventDefault()}
+                          onDrop={() => handleColumnDrop(columnKey)}
+                          onDragEnd={() => setDragColumnKey('')}
+                          title="Drag to reorder columns"
+                        >
+                          {col.label}
+                          <span className={`sort-arrow ${active ? (holdSortDir === 'asc' ? 'asc' : 'desc') : ''}`} />
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
                 <tbody>
                   {filteredHoldings.length === 0 ? (
-                    <tr><td colSpan="14" className="empty-state">No holdings match this filter yet.</td></tr>
+                    <tr><td colSpan={orderedHoldingColumns.length} className="empty-state">No holdings match this filter yet.</td></tr>
                   ) : (
                     filteredHoldings.map((holding) => (
                       <tr key={holding.id}>
-                        <td>{holding.institution_name}</td>
-                        <td className="symbol-highlight">{holding.symbol || holding.metric_symbol || '--'}</td>
-                        <td>{holding.quantity != null ? Number(holding.quantity).toLocaleString() : '--'}</td>
-                        <td>{formatCurrencyOrDash(holding.price)}</td>
-                        <td>{formatCurrencyOrDash(holding.value)}</td>
-                        <td>{formatCurrencyOrDash(holding.cost_basis)}</td>
-                        <td>{formatCurrencyOrDash(holding.cost_basis_per_share)}</td>
-                        <td className={(holding.total_gain_pct ?? 0) >= 0 ? 'positive' : 'negative'}>
-                          {formatPercentOrDash(holding.total_gain_pct)}
-                        </td>
-                        <td className={(holding.change_pct ?? 0) >= 0 ? 'positive' : 'negative'}>
-                          {formatPercentOrDash(holding.change_pct)}
-                        </td>
-                        <td>{holding.option_type || '--'}</td>
-                        <td>{formatRatio(holding.forward_pe)}</td>
-                        <td>{formatCurrencyOrDash(holding.week_52_high)}</td>
-                        <td>{formatCurrencyOrDash(holding.week_52_low)}</td>
-                        <td className={(holding.ytd_gain_pct ?? 0) >= 0 ? 'positive' : 'negative'}>
-                          {formatPercentOrDash(holding.ytd_gain_pct)}
-                        </td>
+                        {orderedHoldingColumns.map((columnKey) => {
+                          const cell = holdingColumnDefs[columnKey].render(holding);
+                          return <td key={`${holding.id}-${columnKey}`} className={cell.className}>{cell.content}</td>;
+                        })}
                       </tr>
                     ))
                   )}
@@ -1393,20 +1524,58 @@ function PlaidPage({
         <>
           <div className="main-grid operations-grid">
             <div className="card">
-              <div className="card-label">PLAID STATUS</div>
-              <h2>Environment</h2>
+              <div className="card-label">BROKERAGE HOLDINGS COVERAGE</div>
+              <h2>Coverage</h2>
+              <div className="operations-stat-row"><span>Total Holdings</span><strong>{holdings.length}</strong></div>
+              <div className="operations-stat-row"><span>Stocks</span><strong>{stockCount}</strong></div>
+              <div className="operations-stat-row"><span>Options</span><strong>{optionCount}</strong></div>
+              <div className="operations-stat-row"><span>Connected Brokerages</span><strong>{connectedBrokerages}</strong></div>
+            </div>
+            <div className="card">
+              <div className="card-label">DATA FEED</div>
+              <h2>Feed Health</h2>
               <div className="operations-stat-row"><span>Configured</span><strong>{data?.configured ? 'Yes' : 'No'}</strong></div>
               <div className="operations-stat-row"><span>Environment</span><strong>{data?.env || '--'}</strong></div>
               <div className="operations-stat-row"><span>Manual Sync</span><strong>{data?.manual_sync_only ? 'Enabled' : 'No'}</strong></div>
               <div className="operations-stat-row"><span>Connected Items</span><strong>{items.length}</strong></div>
             </div>
-            <div className="card">
-              <div className="card-label">SUMMARY</div>
-              <h2>Ingested Records</h2>
-              <div className="operations-stat-row"><span>Bank Accounts</span><strong>{bankAccounts.length}</strong></div>
-              <div className="operations-stat-row"><span>Stock Holdings</span><strong>{holdings.length}</strong></div>
-              <div className="operations-stat-row"><span>Investment Transactions</span><strong>{transactions.length}</strong></div>
-              <div className="operations-stat-row"><span>Sync Logs</span><strong>{syncLogs.length}</strong></div>
+          </div>
+
+          <div className="card operations-table-card">
+            <div className="operations-table-header">
+              <div>
+                <div className="card-label">CONNECTION ACTIONS</div>
+                <h2>Connect and Sync</h2>
+              </div>
+              <div className="operations-actions">
+                <button className="btn-refresh" onClick={() => onConnect('investments')} disabled={linkState.loading}>
+                  {linkState.loading && linkState.mode === 'investments' ? 'Connecting...' : 'Connect Brokerage'}
+                </button>
+                <button className="btn-refresh" onClick={() => onConnect('bank')} disabled={linkState.loading}>
+                  {linkState.loading && linkState.mode === 'bank' ? 'Connecting...' : 'Connect Bank'}
+                </button>
+                <button className="btn-refresh" onClick={onRefresh} disabled={loading}>
+                  {loading ? 'Refreshing...' : 'Refresh'}
+                </button>
+              </div>
+            </div>
+            <div className="main-grid operations-grid">
+              <div className="card">
+                <div className="card-label">SUMMARY</div>
+                <h2>Ingested Records</h2>
+                <div className="operations-stat-row"><span>Bank Accounts</span><strong>{bankAccounts.length}</strong></div>
+                <div className="operations-stat-row"><span>Stock Holdings</span><strong>{holdings.length}</strong></div>
+                <div className="operations-stat-row"><span>Investment Transactions</span><strong>{transactions.length}</strong></div>
+                <div className="operations-stat-row"><span>Sync Logs</span><strong>{syncLogs.length}</strong></div>
+              </div>
+              <div className="card">
+                <div className="card-label">ACCOUNT MIX</div>
+                <h2>Accounts</h2>
+                <div className="operations-stat-row"><span>Brokerage Accounts</span><strong>{allAccounts.filter((a) => a.type === 'investment').length}</strong></div>
+                <div className="operations-stat-row"><span>Bank Accounts</span><strong>{bankAccounts.length}</strong></div>
+                <div className="operations-stat-row"><span>Institutions</span><strong>{items.length}</strong></div>
+                <div className="operations-stat-row"><span>Sync Events</span><strong>{syncLogs.length}</strong></div>
+              </div>
             </div>
           </div>
 
@@ -1583,7 +1752,6 @@ function PlaidPage({
     </div>
   );
 }
-
 
 // ============================================================
 // Auth Page Component

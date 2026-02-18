@@ -426,6 +426,7 @@ def _get_position_market_metrics(symbols: List[str]) -> Dict[str, Dict]:
         'from_52w_high_pct': None,
         'from_52w_low_pct': None,
         'forward_pe': None,
+        'volatility_pct': None,
     }
     results = {symbol: dict(defaults) for symbol in clean_symbols}
 
@@ -491,6 +492,15 @@ def _get_position_market_metrics(symbols: List[str]) -> Dict[str, Dict]:
                     metric['ytd_return_pct'] = ((end_price - start_price) / start_price) * 100.0
                     if current_price is None:
                         current_price = end_price
+
+                try:
+                    daily_returns = ytd_close.pct_change().dropna()
+                    if len(daily_returns) >= 5:
+                        std = _safe_float(daily_returns.std())
+                        if std is not None:
+                            metric['volatility_pct'] = std * (252 ** 0.5) * 100.0
+                except Exception:
+                    pass
 
             if metric['week_52_high'] and metric['week_52_high'] > 0 and current_price is not None:
                 metric['from_52w_high_pct'] = (
@@ -2195,6 +2205,7 @@ class PlaidOverviewView(APIView):
             total_gain_pct = None
             if cost_basis and cost_basis != 0 and value is not None:
                 total_gain_pct = ((value - cost_basis) / cost_basis) * 100.0
+            total_gain_value = (value - cost_basis) if (value is not None and cost_basis is not None) else None
 
             metric_symbol = metric_symbol_by_holding_id.get(h.id) or ''
             symbol_metrics = metrics_by_symbol.get(metric_symbol, {})
@@ -2220,8 +2231,10 @@ class PlaidOverviewView(APIView):
                 'cost_basis': cost_basis,
                 'cost_basis_per_share': cost_basis_per_share,
                 'total_gain_pct': total_gain_pct,
+                'total_gain_value': total_gain_value,
                 'change_pct': symbol_metrics.get('day_change_pct'),
                 'forward_pe': symbol_metrics.get('forward_pe'),
+                'volatility_pct': symbol_metrics.get('volatility_pct'),
                 'week_52_high': symbol_metrics.get('week_52_high'),
                 'week_52_low': symbol_metrics.get('week_52_low'),
                 'ytd_gain_pct': symbol_metrics.get('ytd_return_pct'),
