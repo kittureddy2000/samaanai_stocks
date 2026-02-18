@@ -53,7 +53,7 @@ MARKET_INDEX_CONFIG = {
     'vix': {'symbol': '^VIX', 'label': 'VIX'},
 }
 
-_OCC_OPTION_SYMBOL_RE = re.compile(r'^([A-Z]{1,6})\d{6}([CP])\d{8}$')
+_OCC_OPTION_SYMBOL_RE = re.compile(r'^([A-Z]{1,6})(\d{6})([CP])(\d{8})$')
 
 INDICATOR_LABELS = {
     'rsi': 'RSI',
@@ -525,6 +525,11 @@ def _get_position_market_metrics(symbols: List[str]) -> Dict[str, Dict]:
 
 def _infer_option_type(symbol='', security_type='', security_name='', security_raw=None) -> str:
     """Infer option side (Call/Put) for Plaid holding rows."""
+    occ = _parse_occ_option_symbol(symbol)
+    occ_type = occ.get('option_type')
+    if occ_type:
+        return occ_type
+
     raw = security_raw if isinstance(security_raw, dict) else {}
     raw_option = raw.get('option_contract') if isinstance(raw.get('option_contract'), dict) else {}
 
@@ -542,10 +547,6 @@ def _infer_option_type(symbol='', security_type='', security_name='', security_r
             return 'Put'
 
     clean_symbol = str(symbol or '').strip().upper().replace(' ', '')
-    occ_match = _OCC_OPTION_SYMBOL_RE.match(clean_symbol)
-    if occ_match:
-        return 'Call' if occ_match.group(2) == 'C' else 'Put'
-
     text = f"{security_name or ''} {clean_symbol}".lower()
     if ' call' in f" {text}" or text.endswith('call'):
         return 'Call'
@@ -554,15 +555,47 @@ def _infer_option_type(symbol='', security_type='', security_name='', security_r
     return ''
 
 
+def _parse_occ_option_symbol(symbol='') -> Dict:
+    """Parse OCC option ticker (e.g. AAPL260320P00230000) into readable fields."""
+    clean_symbol = str(symbol or '').strip().upper().replace(' ', '')
+    match = _OCC_OPTION_SYMBOL_RE.match(clean_symbol)
+    if not match:
+        return {}
+
+    underlying = match.group(1)
+    yymmdd = match.group(2)
+    cp = match.group(3)
+    strike_raw = match.group(4)
+
+    expiration_date = ''
+    try:
+        expiration_date = datetime.strptime(yymmdd, '%y%m%d').date().isoformat()
+    except ValueError:
+        expiration_date = ''
+
+    strike_price = None
+    try:
+        strike_price = int(strike_raw) / 1000.0
+    except ValueError:
+        strike_price = None
+
+    return {
+        'underlying_symbol': underlying,
+        'option_type': 'Call' if cp == 'C' else 'Put',
+        'expiration_date': expiration_date,
+        'strike_price': strike_price,
+    }
+
+
 def _resolve_metric_symbol(symbol='', security_type='', security_name='') -> str:
     """Resolve best symbol for market-metric lookup (underlying for options)."""
     clean_symbol = str(symbol or '').strip().upper().replace(' ', '')
     if not clean_symbol:
         return ''
 
-    occ_match = _OCC_OPTION_SYMBOL_RE.match(clean_symbol)
-    if occ_match:
-        return occ_match.group(1)
+    occ = _parse_occ_option_symbol(clean_symbol)
+    if occ.get('underlying_symbol'):
+        return occ['underlying_symbol']
 
     security_type_token = str(security_type or '').strip().lower()
     if 'option' in security_type_token or 'derivative' in security_type_token:
@@ -2224,30 +2257,64 @@ class PlaidOverviewView(APIView):
             price = float(h.institution_price) if h.institution_price is not None else None
             value = float(h.institution_value) if h.institution_value is not None else None
             cost_basis = float(h.cost_basis) if h.cost_basis is not None else None
+            symbol_raw = (security.ticker_symbol if security else '') or ''
+            occ = _parse_occ_option_symbol(symbol_raw)
+            raw_security = security.raw if security and isinstance(security.raw, dict) else {}
+            raw_option = raw_security.get('option_contract') if isinstance(raw_security.get('option_contract'), dict) else {}
+
+            option_expiration = occ.get('expiration_date') or str(raw_option.get('expiration_date') or '').strip() or None
+            option_strike = occ.get('strike_price')
+            if option_strike is None:
+                raw_strike = _safe_float(raw_option.get('strike_price'))
+                option_strike = raw_strike if raw_strike is not None else None
+
+            option_underlying = (
+                occ.get('underlying_symbol')
+                or str(raw_option.get('underlying_ticker_symbol') or '').strip().upper()
+                or str(raw_option.get('underlying_symbol') or '').strip().upper()
+                or str(raw_option.get('underlying_security_ticker') or '').strip().upper()
+                or None
+            )
 
             cost_basis_per_share = None
             if quantity and quantity != 0 and cost_basis is not None:
                 cost_basis_per_share = cost_basis / quantity
 
-            total_gain_pct = None
-            if cost_basis and cost_basis != 0 and value is not None:
-                total_gain_pct = ((value - cost_basis) / cost_basis) * 100.0
             total_gain_value = (value - cost_basis) if (value is not None and cost_basis is not None) else None
+            total_gain_pct = None
+            if total_gain_value is not None and cost_basis is not None and cost_basis != 0:
+                total_gain_pct = (total_gain_value / abs(cost_basis)) * 100.0
 
             metric_symbol = metric_symbol_by_holding_id.get(h.id) or ''
             symbol_metrics = metrics_by_symbol.get(metric_symbol, {})
             option_type = _infer_option_type(
-                symbol=(security.ticker_symbol if security else '') or '',
+                symbol=symbol_raw,
                 security_type=(security.security_type if security else '') or '',
                 security_name=(security.name if security else '') or '',
                 security_raw=(security.raw if security else None),
             )
 
+            option_identity_parts = []
+            if option_type:
+                option_identity_parts.append(option_type.upper())
+            if option_strike is not None:
+                option_identity_parts.append(f"${option_strike:,.2f}")
+            if option_expiration:
+                option_identity_parts.append(option_expiration)
+            symbol_display = symbol_raw
+            if option_underlying and option_identity_parts:
+                symbol_display = f"{option_underlying} {' '.join(option_identity_parts)}"
+
             holdings.append({
                 'id': h.id,
                 'institution_name': h.item.institution_name or h.item.institution_id or h.item.item_id,
                 'account_name': h.account.name or h.account.account_id,
-                'symbol': (security.ticker_symbol if security else '') or '',
+                'symbol': symbol_raw,
+                'symbol_display': symbol_display,
+                'symbol_raw': symbol_raw,
+                'option_underlying': option_underlying,
+                'option_expiration': option_expiration,
+                'option_strike': option_strike,
                 'security_name': (security.name if security else '') or '',
                 'security_type': (security.security_type if security else '') or '',
                 'option_type': option_type or '',

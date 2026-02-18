@@ -1187,6 +1187,8 @@ function PlaidPage({
   const [holdingsColumnOrder, setHoldingsColumnOrder] = useState([
     'institution_name',
     'symbol',
+    'option_expiration',
+    'option_strike',
     'quantity',
     'price',
     'cost_basis_per_share',
@@ -1261,6 +1263,11 @@ function PlaidPage({
       if (!query) return true;
       const haystack = [
         holding.symbol,
+        holding.symbol_display,
+        holding.symbol_raw,
+        holding.option_underlying,
+        holding.option_expiration,
+        holding.option_strike,
         holding.security_name,
         holding.institution_name,
         holding.metric_symbol,
@@ -1281,10 +1288,21 @@ function PlaidPage({
   };
 
   const getTotalGainValue = (holding) => {
+    const provided = Number(holding.total_gain_value);
+    if (Number.isFinite(provided)) return provided;
     const value = Number(holding.value);
     const basis = Number(holding.cost_basis);
     if (!Number.isFinite(value) || !Number.isFinite(basis)) return null;
     return value - basis;
+  };
+
+  const formatStrikeOrDash = (value) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '--';
+    return `$${n.toLocaleString('en-US', {
+      minimumFractionDigits: n % 1 === 0 ? 0 : 2,
+      maximumFractionDigits: 2,
+    })}`;
   };
 
   const holdingColumnDefs = useMemo(() => ({
@@ -1296,7 +1314,35 @@ function PlaidPage({
     symbol: {
       label: 'Symbol',
       sortKey: 'symbol',
-      render: (holding) => ({ content: holding.symbol || holding.metric_symbol || '--', className: 'symbol-highlight' }),
+      render: (holding) => {
+        const primary = holding.symbol_display || holding.option_underlying || holding.symbol || holding.metric_symbol || '--';
+        const secondaryParts = [];
+        if (holding.option_expiration) secondaryParts.push(`Exp ${holding.option_expiration}`);
+        if (holding.option_strike != null) secondaryParts.push(`Strike ${formatStrikeOrDash(holding.option_strike)}`);
+        if (holding.symbol_raw && holding.symbol_raw !== primary) secondaryParts.push(holding.symbol_raw);
+
+        return {
+          content: (
+            <div className="plaid-symbol-cell">
+              <div className="symbol-highlight">{primary}</div>
+              {secondaryParts.length > 0 && (
+                <div className="plaid-symbol-meta">{secondaryParts.join(' • ')}</div>
+              )}
+            </div>
+          ),
+          className: '',
+        };
+      },
+    },
+    option_expiration: {
+      label: 'Expiration Date',
+      sortKey: 'option_expiration',
+      render: (holding) => ({ content: holding.option_expiration || '--', className: '' }),
+    },
+    option_strike: {
+      label: 'Strike Price',
+      sortKey: 'option_strike',
+      render: (holding) => ({ content: formatStrikeOrDash(holding.option_strike), className: '' }),
     },
     quantity: {
       label: 'Qty',

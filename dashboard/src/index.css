@@ -1471,6 +1471,18 @@ td {
   background: rgba(255, 77, 77, 0.16);
 }
 
+.plaid-symbol-cell {
+  display: grid;
+  gap: 2px;
+}
+
+.plaid-symbol-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
 .draggable-th {
   cursor: grab;
   user-select: none;
