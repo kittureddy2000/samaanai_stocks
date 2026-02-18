@@ -9,6 +9,7 @@ import os
 import time
 import threading
 import csv
+import re
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
 from django.conf import settings
@@ -51,6 +52,8 @@ MARKET_INDEX_CONFIG = {
     'nasdaq': {'symbol': '^IXIC', 'label': 'Nasdaq'},
     'vix': {'symbol': '^VIX', 'label': 'VIX'},
 }
+
+_OCC_OPTION_SYMBOL_RE = re.compile(r'^([A-Z]{1,6})\d{6}([CP])\d{8}$')
 
 INDICATOR_LABELS = {
     'rsi': 'RSI',
@@ -422,6 +425,7 @@ def _get_position_market_metrics(symbols: List[str]) -> Dict[str, Dict]:
         'week_52_low': None,
         'from_52w_high_pct': None,
         'from_52w_low_pct': None,
+        'forward_pe': None,
     }
     results = {symbol: dict(defaults) for symbol in clean_symbols}
 
@@ -477,6 +481,7 @@ def _get_position_market_metrics(symbols: List[str]) -> Dict[str, Dict]:
                 _safe_float(fast_info.get('yearLow'))
                 or _safe_float(info.get('fiftyTwoWeekLow'))
             )
+            metric['forward_pe'] = _safe_float(info.get('forwardPE'))
 
             ytd_close = _extract_close_series(ytd_download, symbol, clean_symbols)
             if ytd_close is not None and len(ytd_close) >= 2:
@@ -506,6 +511,56 @@ def _get_position_market_metrics(symbols: List[str]) -> Dict[str, Dict]:
         _position_metrics_cache['results'] = dict(results)
 
     return results
+
+
+def _infer_option_type(symbol='', security_type='', security_name='', security_raw=None) -> str:
+    """Infer option side (Call/Put) for Plaid holding rows."""
+    raw = security_raw if isinstance(security_raw, dict) else {}
+    raw_option = raw.get('option_contract') if isinstance(raw.get('option_contract'), dict) else {}
+
+    for value in (
+        raw_option.get('type'),
+        raw_option.get('option_type'),
+        raw.get('option_type'),
+        raw.get('type'),
+        security_type,
+    ):
+        token = str(value or '').strip().lower()
+        if token == 'call':
+            return 'Call'
+        if token == 'put':
+            return 'Put'
+
+    clean_symbol = str(symbol or '').strip().upper().replace(' ', '')
+    occ_match = _OCC_OPTION_SYMBOL_RE.match(clean_symbol)
+    if occ_match:
+        return 'Call' if occ_match.group(2) == 'C' else 'Put'
+
+    text = f"{security_name or ''} {clean_symbol}".lower()
+    if ' call' in f" {text}" or text.endswith('call'):
+        return 'Call'
+    if ' put' in f" {text}" or text.endswith('put'):
+        return 'Put'
+    return ''
+
+
+def _resolve_metric_symbol(symbol='', security_type='', security_name='') -> str:
+    """Resolve best symbol for market-metric lookup (underlying for options)."""
+    clean_symbol = str(symbol or '').strip().upper().replace(' ', '')
+    if not clean_symbol:
+        return ''
+
+    occ_match = _OCC_OPTION_SYMBOL_RE.match(clean_symbol)
+    if occ_match:
+        return occ_match.group(1)
+
+    security_type_token = str(security_type or '').strip().lower()
+    if 'option' in security_type_token or 'derivative' in security_type_token:
+        name_match = re.search(r'\b([A-Z]{1,6})\b', str(security_name or '').upper())
+        if name_match:
+            return name_match.group(1)
+
+    return clean_symbol
 
 
 def _enrich_positions_with_market_metrics(positions: List[Dict]) -> List[Dict]:
@@ -2110,19 +2165,69 @@ class PlaidOverviewView(APIView):
         holdings_qs = PlaidHolding.objects.filter(item__user=request.user).select_related(
             'item', 'account', 'security'
         ).order_by('-institution_value', '-updated_at')[:limit_holdings]
-        holdings = [{
-            'id': h.id,
-            'institution_name': h.item.institution_name or h.item.institution_id or h.item.item_id,
-            'account_name': h.account.name or h.account.account_id,
-            'symbol': (h.security.ticker_symbol if h.security else '') or '',
-            'security_name': (h.security.name if h.security else '') or '',
-            'quantity': float(h.quantity) if h.quantity is not None else None,
-            'price': float(h.institution_price) if h.institution_price is not None else None,
-            'value': float(h.institution_value) if h.institution_value is not None else None,
-            'cost_basis': float(h.cost_basis) if h.cost_basis is not None else None,
-            'currency': h.iso_currency_code or h.unofficial_currency_code or 'USD',
-            'updated_at': timezone.localtime(h.updated_at).isoformat(),
-        } for h in holdings_qs]
+        holdings_list = list(holdings_qs)
+        metric_symbol_by_holding_id = {}
+        metric_symbols = []
+        for holding in holdings_list:
+            sec = holding.security
+            lookup_symbol = _resolve_metric_symbol(
+                symbol=(sec.ticker_symbol if sec else '') or '',
+                security_type=(sec.security_type if sec else '') or '',
+                security_name=(sec.name if sec else '') or '',
+            )
+            metric_symbol_by_holding_id[holding.id] = lookup_symbol
+            if lookup_symbol:
+                metric_symbols.append(lookup_symbol)
+        metrics_by_symbol = _get_position_market_metrics(metric_symbols)
+
+        holdings = []
+        for h in holdings_list:
+            security = h.security
+            quantity = float(h.quantity) if h.quantity is not None else None
+            price = float(h.institution_price) if h.institution_price is not None else None
+            value = float(h.institution_value) if h.institution_value is not None else None
+            cost_basis = float(h.cost_basis) if h.cost_basis is not None else None
+
+            cost_basis_per_share = None
+            if quantity and quantity != 0 and cost_basis is not None:
+                cost_basis_per_share = cost_basis / quantity
+
+            total_gain_pct = None
+            if cost_basis and cost_basis != 0 and value is not None:
+                total_gain_pct = ((value - cost_basis) / cost_basis) * 100.0
+
+            metric_symbol = metric_symbol_by_holding_id.get(h.id) or ''
+            symbol_metrics = metrics_by_symbol.get(metric_symbol, {})
+            option_type = _infer_option_type(
+                symbol=(security.ticker_symbol if security else '') or '',
+                security_type=(security.security_type if security else '') or '',
+                security_name=(security.name if security else '') or '',
+                security_raw=(security.raw if security else None),
+            )
+
+            holdings.append({
+                'id': h.id,
+                'institution_name': h.item.institution_name or h.item.institution_id or h.item.item_id,
+                'account_name': h.account.name or h.account.account_id,
+                'symbol': (security.ticker_symbol if security else '') or '',
+                'security_name': (security.name if security else '') or '',
+                'security_type': (security.security_type if security else '') or '',
+                'option_type': option_type or '',
+                'metric_symbol': metric_symbol,
+                'quantity': quantity,
+                'price': price,
+                'value': value,
+                'cost_basis': cost_basis,
+                'cost_basis_per_share': cost_basis_per_share,
+                'total_gain_pct': total_gain_pct,
+                'change_pct': symbol_metrics.get('day_change_pct'),
+                'forward_pe': symbol_metrics.get('forward_pe'),
+                'week_52_high': symbol_metrics.get('week_52_high'),
+                'week_52_low': symbol_metrics.get('week_52_low'),
+                'ytd_gain_pct': symbol_metrics.get('ytd_return_pct'),
+                'currency': h.iso_currency_code or h.unofficial_currency_code or 'USD',
+                'updated_at': timezone.localtime(h.updated_at).isoformat(),
+            })
 
         transactions_qs = PlaidInvestmentTransaction.objects.filter(item__user=request.user).select_related(
             'item', 'account', 'security'

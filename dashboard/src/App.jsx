@@ -1165,6 +1165,10 @@ function PlaidPage({
   onManualSync,
   onDisconnect,
 }) {
+  const [plaidTab, setPlaidTab] = useState('holdings');
+  const [holdingsQuery, setHoldingsQuery] = useState('');
+  const [holdingsAssetFilter, setHoldingsAssetFilter] = useState('all');
+
   const items = data?.items || [];
   const holdings = data?.holdings || [];
   const transactions = data?.transactions || [];
@@ -1184,28 +1188,91 @@ function PlaidPage({
   const { sorted: sortedHoldings, sortKey: holdSortKey, sortDir: holdSortDir, handleSort: holdSort } = useSortableTable(holdings, 'value');
   const { sorted: sortedTransactions, sortKey: txSortKey, sortDir: txSortDir, handleSort: txSort } = useSortableTable(transactions, 'date');
   const { sorted: sortedSyncLogs, sortKey: syncSortKey, sortDir: syncSortDir, handleSort: syncSort } = useSortableTable(syncLogs, 'started_at');
+  const query = holdingsQuery.trim().toLowerCase();
+
+  const classifyHoldingAsset = (holding) => {
+    const optionType = String(holding.option_type || '').toLowerCase();
+    if (optionType === 'call' || optionType === 'put') return 'options';
+    const securityType = String(holding.security_type || '').toLowerCase();
+    if (securityType.includes('option') || securityType.includes('derivative')) return 'options';
+    if (
+      securityType.includes('equity')
+      || securityType.includes('stock')
+      || securityType.includes('etf')
+      || securityType.includes('adr')
+      || securityType === ''
+    ) {
+      return 'stocks';
+    }
+    return 'other';
+  };
+
+  const filteredHoldings = useMemo(() => {
+    return sortedHoldings.filter((holding) => {
+      const assetClass = classifyHoldingAsset(holding);
+      if (holdingsAssetFilter === 'stocks' && assetClass !== 'stocks') return false;
+      if (holdingsAssetFilter === 'options' && assetClass !== 'options') return false;
+
+      if (!query) return true;
+      const haystack = [
+        holding.symbol,
+        holding.security_name,
+        holding.institution_name,
+        holding.metric_symbol,
+        holding.option_type,
+      ].join(' ').toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [sortedHoldings, holdingsAssetFilter, query]);
+
+  const stockCount = holdings.filter((h) => classifyHoldingAsset(h) === 'stocks').length;
+  const optionCount = holdings.filter((h) => classifyHoldingAsset(h) === 'options').length;
+
+  const formatRatio = (value) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n.toFixed(2) : '--';
+  };
 
   return (
     <div className="plaid-page">
       <div className="dash-header-row">
         <div>
           <div className="dash-label">PLAID INTEGRATIONS</div>
-          <h2 className="dash-title">Connected Brokerages and Banks</h2>
+          <h2 className="dash-title">Brokerage Holdings via Plaid</h2>
           <p className="dash-subtitle">
-            Read-only ingestion. No portfolio merge. Manual sync only.
+            Read-only ingestion for trading decisions. No portfolio merge. Manual sync only.
           </p>
         </div>
         <div className="operations-actions">
-          <button className="btn-refresh" onClick={() => onConnect('investments')} disabled={linkState.loading}>
-            {linkState.loading && linkState.mode === 'investments' ? 'Connecting...' : 'Connect Brokerage'}
-          </button>
-          <button className="btn-refresh" onClick={() => onConnect('bank')} disabled={linkState.loading}>
-            {linkState.loading && linkState.mode === 'bank' ? 'Connecting...' : 'Connect Bank'}
-          </button>
+          {plaidTab === 'connections' && (
+            <>
+              <button className="btn-refresh" onClick={() => onConnect('investments')} disabled={linkState.loading}>
+                {linkState.loading && linkState.mode === 'investments' ? 'Connecting...' : 'Connect Brokerage'}
+              </button>
+              <button className="btn-refresh" onClick={() => onConnect('bank')} disabled={linkState.loading}>
+                {linkState.loading && linkState.mode === 'bank' ? 'Connecting...' : 'Connect Bank'}
+              </button>
+            </>
+          )}
           <button className="btn-refresh" onClick={onRefresh} disabled={loading}>
             {loading ? 'Refreshing...' : 'Refresh'}
           </button>
         </div>
+      </div>
+
+      <div className="nav-tabs plaid-subtabs">
+        <button
+          className={`nav-tab ${plaidTab === 'holdings' ? 'active' : ''}`}
+          onClick={() => setPlaidTab('holdings')}
+        >
+          Brokerage Holdings
+        </button>
+        <button
+          className={`nav-tab ${plaidTab === 'connections' ? 'active' : ''}`}
+          onClick={() => setPlaidTab('connections')}
+        >
+          Connections & Sync
+        </button>
       </div>
 
       {error && <div className="oc-form-error">{error}</div>}
@@ -1213,232 +1280,306 @@ function PlaidPage({
       {actionState.error && <div className="oc-form-error">{actionState.error}</div>}
       {actionState.success && <div className="operations-analyze-result">{actionState.success}</div>}
 
-      <div className="main-grid operations-grid">
-        <div className="card">
-          <div className="card-label">PLAID STATUS</div>
-          <h2>Environment</h2>
-          <div className="operations-stat-row"><span>Configured</span><strong>{data?.configured ? 'Yes' : 'No'}</strong></div>
-          <div className="operations-stat-row"><span>Environment</span><strong>{data?.env || '--'}</strong></div>
-          <div className="operations-stat-row"><span>Manual Sync</span><strong>{data?.manual_sync_only ? 'Enabled' : 'No'}</strong></div>
-          <div className="operations-stat-row"><span>Connected Items</span><strong>{items.length}</strong></div>
-        </div>
-        <div className="card">
-          <div className="card-label">SUMMARY</div>
-          <h2>Ingested Records</h2>
-          <div className="operations-stat-row"><span>Bank Accounts</span><strong>{bankAccounts.length}</strong></div>
-          <div className="operations-stat-row"><span>Stock Holdings</span><strong>{holdings.length}</strong></div>
-          <div className="operations-stat-row"><span>Investment Transactions</span><strong>{transactions.length}</strong></div>
-          <div className="operations-stat-row"><span>Sync Logs</span><strong>{syncLogs.length}</strong></div>
-        </div>
-      </div>
+      {plaidTab === 'holdings' && (
+        <>
+          <div className="main-grid operations-grid">
+            <div className="card">
+              <div className="card-label">MARKET SNAPSHOT</div>
+              <h2>Brokerage Holdings Coverage</h2>
+              <div className="operations-stat-row"><span>Total Holdings</span><strong>{holdings.length}</strong></div>
+              <div className="operations-stat-row"><span>Stocks</span><strong>{stockCount}</strong></div>
+              <div className="operations-stat-row"><span>Options</span><strong>{optionCount}</strong></div>
+              <div className="operations-stat-row"><span>Connected Brokerages</span><strong>{items.filter((item) => item.product_type === 'investments').length}</strong></div>
+            </div>
+            <div className="card">
+              <div className="card-label">PLAID STATUS</div>
+              <h2>Data Feed</h2>
+              <div className="operations-stat-row"><span>Configured</span><strong>{data?.configured ? 'Yes' : 'No'}</strong></div>
+              <div className="operations-stat-row"><span>Environment</span><strong>{data?.env || '--'}</strong></div>
+              <div className="operations-stat-row"><span>Manual Sync</span><strong>{data?.manual_sync_only ? 'Enabled' : 'No'}</strong></div>
+              <div className="operations-stat-row"><span>Last Sync Logs</span><strong>{syncLogs.length}</strong></div>
+            </div>
+          </div>
 
-      <div className="card operations-table-card">
-        <div className="card-label">CONNECTED ITEMS</div>
-        <h2>Institutions</h2>
-        <div className="positions">
-          <table className="positions-table">
-            <thead>
-              <tr>
-                <SortTh label="Institution" sortKey="institution_name" currentKey={itemsSortKey} currentDir={itemsSortDir} onSort={itemsSort} />
-                <SortTh label="Type" sortKey="product_type" currentKey={itemsSortKey} currentDir={itemsSortDir} onSort={itemsSort} />
-                <th>Status</th>
-                <th>Accounts</th>
-                <th>Holdings</th>
-                <th>Transactions</th>
-                <SortTh label="Last Sync" sortKey="last_sync_at" currentKey={itemsSortKey} currentDir={itemsSortDir} onSort={itemsSort} />
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedItems.length === 0 ? (
-                <tr><td colSpan="8" className="empty-state">No Plaid institutions connected yet.</td></tr>
-              ) : (
-                sortedItems.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.institution_name}</td>
-                    <td>{item.product_type}</td>
-                    <td className={item.status === 'active' ? 'positive' : 'negative'}>{item.status}</td>
-                    <td>{item.counts?.accounts ?? 0}</td>
-                    <td>{item.counts?.holdings ?? 0}</td>
-                    <td>{item.counts?.transactions ?? 0}</td>
-                    <td>{item.last_sync_at ? new Date(item.last_sync_at).toLocaleString() : '--'}</td>
-                    <td>
-                      <div className="plaid-actions">
-                        <button
-                          className="btn-refresh"
-                          onClick={() => onManualSync(item.id)}
-                          disabled={actionState.syncingItemId === item.id || actionState.disconnectingItemId === item.id}
-                        >
-                          {actionState.syncingItemId === item.id ? 'Syncing...' : 'Sync Now'}
-                        </button>
-                        <button
-                          className="btn-remove-watchlist"
-                          onClick={() => onDisconnect(item.id)}
-                          disabled={actionState.disconnectingItemId === item.id || actionState.syncingItemId === item.id}
-                        >
-                          {actionState.disconnectingItemId === item.id ? '...' : 'Disconnect'}
-                        </button>
-                      </div>
-                    </td>
+          <div className="card operations-table-card">
+            <div className="card-label">STOCK HOLDINGS</div>
+            <h2>Brokerage Holdings via Plaid</h2>
+            <div className="plaid-holdings-toolbar">
+              <input
+                className="plaid-filter-input"
+                type="text"
+                value={holdingsQuery}
+                onChange={(event) => setHoldingsQuery(event.target.value)}
+                placeholder="Filter by symbol, underlying, institution..."
+              />
+              <div className="plaid-filter-group">
+                <button
+                  className={`plaid-filter-chip ${holdingsAssetFilter === 'all' ? 'active' : ''}`}
+                  onClick={() => setHoldingsAssetFilter('all')}
+                >
+                  All
+                </button>
+                <button
+                  className={`plaid-filter-chip ${holdingsAssetFilter === 'stocks' ? 'active' : ''}`}
+                  onClick={() => setHoldingsAssetFilter('stocks')}
+                >
+                  Stocks
+                </button>
+                <button
+                  className={`plaid-filter-chip ${holdingsAssetFilter === 'options' ? 'active' : ''}`}
+                  onClick={() => setHoldingsAssetFilter('options')}
+                >
+                  Options
+                </button>
+              </div>
+            </div>
+            <div className="positions">
+              <table className="positions-table">
+                <thead>
+                  <tr>
+                    <SortTh label="Institution" sortKey="institution_name" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
+                    <SortTh label="Symbol" sortKey="symbol" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
+                    <SortTh label="Qty" sortKey="quantity" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
+                    <SortTh label="Price" sortKey="price" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
+                    <SortTh label="Value" sortKey="value" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
+                    <SortTh label="Cost Basis" sortKey="cost_basis" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
+                    <SortTh label="Cost Basis/Share" sortKey="cost_basis_per_share" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
+                    <SortTh label="% Total Gain" sortKey="total_gain_pct" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
+                    <SortTh label="% Change" sortKey="change_pct" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
+                    <SortTh label="Option Type" sortKey="option_type" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
+                    <SortTh label="Forward P/E" sortKey="forward_pe" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
+                    <SortTh label="52W High" sortKey="week_52_high" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
+                    <SortTh label="52W Low" sortKey="week_52_low" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
+                    <SortTh label="YTD Gain %" sortKey="ytd_gain_pct" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                </thead>
+                <tbody>
+                  {filteredHoldings.length === 0 ? (
+                    <tr><td colSpan="14" className="empty-state">No holdings match this filter yet.</td></tr>
+                  ) : (
+                    filteredHoldings.map((holding) => (
+                      <tr key={holding.id}>
+                        <td>{holding.institution_name}</td>
+                        <td className="symbol-highlight">{holding.symbol || holding.metric_symbol || '--'}</td>
+                        <td>{holding.quantity != null ? Number(holding.quantity).toLocaleString() : '--'}</td>
+                        <td>{formatCurrencyOrDash(holding.price)}</td>
+                        <td>{formatCurrencyOrDash(holding.value)}</td>
+                        <td>{formatCurrencyOrDash(holding.cost_basis)}</td>
+                        <td>{formatCurrencyOrDash(holding.cost_basis_per_share)}</td>
+                        <td className={(holding.total_gain_pct ?? 0) >= 0 ? 'positive' : 'negative'}>
+                          {formatPercentOrDash(holding.total_gain_pct)}
+                        </td>
+                        <td className={(holding.change_pct ?? 0) >= 0 ? 'positive' : 'negative'}>
+                          {formatPercentOrDash(holding.change_pct)}
+                        </td>
+                        <td>{holding.option_type || '--'}</td>
+                        <td>{formatRatio(holding.forward_pe)}</td>
+                        <td>{formatCurrencyOrDash(holding.week_52_high)}</td>
+                        <td>{formatCurrencyOrDash(holding.week_52_low)}</td>
+                        <td className={(holding.ytd_gain_pct ?? 0) >= 0 ? 'positive' : 'negative'}>
+                          {formatPercentOrDash(holding.ytd_gain_pct)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
 
-      <div className="card operations-table-card">
-        <div className="card-label">BANK ACCOUNTS</div>
-        <h2>Linked Bank Accounts</h2>
-        <div className="positions">
-          <table className="positions-table">
-            <thead>
-              <tr>
-                <SortTh label="Institution" sortKey="institution_name" currentKey={bankSortKey} currentDir={bankSortDir} onSort={bankSort} />
-                <SortTh label="Account" sortKey="name" currentKey={bankSortKey} currentDir={bankSortDir} onSort={bankSort} />
-                <SortTh label="Type" sortKey="type" currentKey={bankSortKey} currentDir={bankSortDir} onSort={bankSort} />
-                <SortTh label="Subtype" sortKey="subtype" currentKey={bankSortKey} currentDir={bankSortDir} onSort={bankSort} />
-                <SortTh label="Balance" sortKey="current_balance" currentKey={bankSortKey} currentDir={bankSortDir} onSort={bankSort} />
-                <SortTh label="Available" sortKey="available_balance" currentKey={bankSortKey} currentDir={bankSortDir} onSort={bankSort} />
-              </tr>
-            </thead>
-            <tbody>
-              {sortedBankAccounts.length === 0 ? (
-                <tr><td colSpan="6" className="empty-state">No bank accounts ingested.</td></tr>
-              ) : (
-                sortedBankAccounts.map((account) => (
-                  <tr key={account.account_id}>
-                    <td>{account.institution_name}</td>
-                    <td>{account.name}{account.mask ? ` ••••${account.mask}` : ''}</td>
-                    <td>{account.type || '--'}</td>
-                    <td>{account.subtype || '--'}</td>
-                    <td>{account.current_balance != null ? formatCurrency(account.current_balance) : '--'}</td>
-                    <td>{account.available_balance != null ? formatCurrency(account.available_balance) : '--'}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {plaidTab === 'connections' && (
+        <>
+          <div className="main-grid operations-grid">
+            <div className="card">
+              <div className="card-label">PLAID STATUS</div>
+              <h2>Environment</h2>
+              <div className="operations-stat-row"><span>Configured</span><strong>{data?.configured ? 'Yes' : 'No'}</strong></div>
+              <div className="operations-stat-row"><span>Environment</span><strong>{data?.env || '--'}</strong></div>
+              <div className="operations-stat-row"><span>Manual Sync</span><strong>{data?.manual_sync_only ? 'Enabled' : 'No'}</strong></div>
+              <div className="operations-stat-row"><span>Connected Items</span><strong>{items.length}</strong></div>
+            </div>
+            <div className="card">
+              <div className="card-label">SUMMARY</div>
+              <h2>Ingested Records</h2>
+              <div className="operations-stat-row"><span>Bank Accounts</span><strong>{bankAccounts.length}</strong></div>
+              <div className="operations-stat-row"><span>Stock Holdings</span><strong>{holdings.length}</strong></div>
+              <div className="operations-stat-row"><span>Investment Transactions</span><strong>{transactions.length}</strong></div>
+              <div className="operations-stat-row"><span>Sync Logs</span><strong>{syncLogs.length}</strong></div>
+            </div>
+          </div>
 
-      <div className="card operations-table-card">
-        <div className="card-label">STOCK HOLDINGS</div>
-        <h2>Brokerage Holdings via Plaid</h2>
-        <div className="positions">
-          <table className="positions-table">
-            <thead>
-              <tr>
-                <SortTh label="Institution" sortKey="institution_name" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
-                <SortTh label="Account" sortKey="account_name" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
-                <SortTh label="Symbol" sortKey="symbol" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
-                <SortTh label="Security" sortKey="security_name" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
-                <SortTh label="Qty" sortKey="quantity" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
-                <SortTh label="Price" sortKey="price" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
-                <SortTh label="Value" sortKey="value" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
-                <SortTh label="Cost Basis" sortKey="cost_basis" currentKey={holdSortKey} currentDir={holdSortDir} onSort={holdSort} />
-              </tr>
-            </thead>
-            <tbody>
-              {sortedHoldings.length === 0 ? (
-                <tr><td colSpan="8" className="empty-state">No holdings ingested yet.</td></tr>
-              ) : (
-                sortedHoldings.map((holding) => (
-                  <tr key={holding.id}>
-                    <td>{holding.institution_name}</td>
-                    <td>{holding.account_name}</td>
-                    <td className="symbol-highlight">{holding.symbol || '--'}</td>
-                    <td>{holding.security_name || '--'}</td>
-                    <td>{holding.quantity != null ? Number(holding.quantity).toLocaleString() : '--'}</td>
-                    <td>{holding.price != null ? formatCurrency(holding.price) : '--'}</td>
-                    <td>{holding.value != null ? formatCurrency(holding.value) : '--'}</td>
-                    <td>{holding.cost_basis != null ? formatCurrency(holding.cost_basis) : '--'}</td>
+          <div className="card operations-table-card">
+            <div className="card-label">CONNECTED ITEMS</div>
+            <h2>Institutions</h2>
+            <div className="positions">
+              <table className="positions-table">
+                <thead>
+                  <tr>
+                    <SortTh label="Institution" sortKey="institution_name" currentKey={itemsSortKey} currentDir={itemsSortDir} onSort={itemsSort} />
+                    <SortTh label="Type" sortKey="product_type" currentKey={itemsSortKey} currentDir={itemsSortDir} onSort={itemsSort} />
+                    <th>Status</th>
+                    <th>Accounts</th>
+                    <th>Holdings</th>
+                    <th>Transactions</th>
+                    <SortTh label="Last Sync" sortKey="last_sync_at" currentKey={itemsSortKey} currentDir={itemsSortDir} onSort={itemsSort} />
+                    <th>Actions</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                </thead>
+                <tbody>
+                  {sortedItems.length === 0 ? (
+                    <tr><td colSpan="8" className="empty-state">No Plaid institutions connected yet.</td></tr>
+                  ) : (
+                    sortedItems.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.institution_name}</td>
+                        <td>{item.product_type}</td>
+                        <td className={item.status === 'active' ? 'positive' : 'negative'}>{item.status}</td>
+                        <td>{item.counts?.accounts ?? 0}</td>
+                        <td>{item.counts?.holdings ?? 0}</td>
+                        <td>{item.counts?.transactions ?? 0}</td>
+                        <td>{item.last_sync_at ? new Date(item.last_sync_at).toLocaleString() : '--'}</td>
+                        <td>
+                          <div className="plaid-actions">
+                            <button
+                              className="btn-refresh"
+                              onClick={() => onManualSync(item.id)}
+                              disabled={actionState.syncingItemId === item.id || actionState.disconnectingItemId === item.id}
+                            >
+                              {actionState.syncingItemId === item.id ? 'Syncing...' : 'Sync Now'}
+                            </button>
+                            <button
+                              className="btn-remove-watchlist"
+                              onClick={() => onDisconnect(item.id)}
+                              disabled={actionState.disconnectingItemId === item.id || actionState.syncingItemId === item.id}
+                            >
+                              {actionState.disconnectingItemId === item.id ? '...' : 'Disconnect'}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
 
-      <div className="card operations-table-card">
-        <div className="card-label">INVESTMENT TRANSACTIONS</div>
-        <h2>Recent Plaid Investment Activity</h2>
-        <div className="positions">
-          <table className="positions-table">
-            <thead>
-              <tr>
-                <SortTh label="Date" sortKey="date" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
-                <SortTh label="Institution" sortKey="institution_name" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
-                <SortTh label="Symbol" sortKey="symbol" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
-                <SortTh label="Name" sortKey="name" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
-                <SortTh label="Type" sortKey="type" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
-                <SortTh label="Qty" sortKey="quantity" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
-                <SortTh label="Price" sortKey="price" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
-                <SortTh label="Amount" sortKey="amount" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
-              </tr>
-            </thead>
-            <tbody>
-              {sortedTransactions.length === 0 ? (
-                <tr><td colSpan="8" className="empty-state">No investment transactions synced yet.</td></tr>
-              ) : (
-                sortedTransactions.map((tx) => (
-                  <tr key={tx.id}>
-                    <td>{tx.date || '--'}</td>
-                    <td>{tx.institution_name}</td>
-                    <td className="symbol-highlight">{tx.symbol || '--'}</td>
-                    <td>{tx.name || '--'}</td>
-                    <td>{tx.type || '--'}{tx.subtype ? ` / ${tx.subtype}` : ''}</td>
-                    <td>{tx.quantity != null ? Number(tx.quantity).toLocaleString() : '--'}</td>
-                    <td>{tx.price != null ? formatCurrency(tx.price) : '--'}</td>
-                    <td>{tx.amount != null ? formatCurrency(tx.amount) : '--'}</td>
+          <div className="card operations-table-card">
+            <div className="card-label">BANK ACCOUNTS</div>
+            <h2>Linked Bank Accounts</h2>
+            <div className="positions">
+              <table className="positions-table">
+                <thead>
+                  <tr>
+                    <SortTh label="Institution" sortKey="institution_name" currentKey={bankSortKey} currentDir={bankSortDir} onSort={bankSort} />
+                    <SortTh label="Account" sortKey="name" currentKey={bankSortKey} currentDir={bankSortDir} onSort={bankSort} />
+                    <SortTh label="Type" sortKey="type" currentKey={bankSortKey} currentDir={bankSortDir} onSort={bankSort} />
+                    <SortTh label="Subtype" sortKey="subtype" currentKey={bankSortKey} currentDir={bankSortDir} onSort={bankSort} />
+                    <SortTh label="Balance" sortKey="current_balance" currentKey={bankSortKey} currentDir={bankSortDir} onSort={bankSort} />
+                    <SortTh label="Available" sortKey="available_balance" currentKey={bankSortKey} currentDir={bankSortDir} onSort={bankSort} />
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                </thead>
+                <tbody>
+                  {sortedBankAccounts.length === 0 ? (
+                    <tr><td colSpan="6" className="empty-state">No bank accounts ingested.</td></tr>
+                  ) : (
+                    sortedBankAccounts.map((account) => (
+                      <tr key={account.account_id}>
+                        <td>{account.institution_name}</td>
+                        <td>{account.name}{account.mask ? ` ••••${account.mask}` : ''}</td>
+                        <td>{account.type || '--'}</td>
+                        <td>{account.subtype || '--'}</td>
+                        <td>{account.current_balance != null ? formatCurrency(account.current_balance) : '--'}</td>
+                        <td>{account.available_balance != null ? formatCurrency(account.available_balance) : '--'}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
 
-      <div className="card operations-table-card">
-        <div className="card-label">SYNC LOGS</div>
-        <h2>Manual Sync History</h2>
-        <div className="positions">
-          <table className="positions-table">
-            <thead>
-              <tr>
-                <SortTh label="Time" sortKey="started_at" currentKey={syncSortKey} currentDir={syncSortDir} onSort={syncSort} />
-                <SortTh label="Institution" sortKey="institution_name" currentKey={syncSortKey} currentDir={syncSortDir} onSort={syncSort} />
-                <SortTh label="Status" sortKey="status" currentKey={syncSortKey} currentDir={syncSortDir} onSort={syncSort} />
-                <th>Accounts</th>
-                <th>Holdings</th>
-                <th>Transactions</th>
-                <th>Duration (ms)</th>
-                <th>Message</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedSyncLogs.length === 0 ? (
-                <tr><td colSpan="8" className="empty-state">No sync logs yet.</td></tr>
-              ) : (
-                sortedSyncLogs.map((log) => (
-                  <tr key={log.id}>
-                    <td>{log.started_at ? new Date(log.started_at).toLocaleString() : '--'}</td>
-                    <td>{log.institution_name || '--'}</td>
-                    <td className={log.status === 'success' ? 'positive' : 'negative'}>{log.status}</td>
-                    <td>{log.accounts_synced ?? 0}</td>
-                    <td>{log.holdings_synced ?? 0}</td>
-                    <td>{log.transactions_synced ?? 0}</td>
-                    <td>{log.duration_ms ?? '--'}</td>
-                    <td>{log.message || '--'}</td>
+          <div className="card operations-table-card">
+            <div className="card-label">INVESTMENT TRANSACTIONS</div>
+            <h2>Recent Plaid Investment Activity</h2>
+            <div className="positions">
+              <table className="positions-table">
+                <thead>
+                  <tr>
+                    <SortTh label="Date" sortKey="date" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
+                    <SortTh label="Institution" sortKey="institution_name" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
+                    <SortTh label="Symbol" sortKey="symbol" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
+                    <SortTh label="Name" sortKey="name" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
+                    <SortTh label="Type" sortKey="type" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
+                    <SortTh label="Qty" sortKey="quantity" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
+                    <SortTh label="Price" sortKey="price" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
+                    <SortTh label="Amount" sortKey="amount" currentKey={txSortKey} currentDir={txSortDir} onSort={txSort} />
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                </thead>
+                <tbody>
+                  {sortedTransactions.length === 0 ? (
+                    <tr><td colSpan="8" className="empty-state">No investment transactions synced yet.</td></tr>
+                  ) : (
+                    sortedTransactions.map((tx) => (
+                      <tr key={tx.id}>
+                        <td>{tx.date || '--'}</td>
+                        <td>{tx.institution_name}</td>
+                        <td className="symbol-highlight">{tx.symbol || '--'}</td>
+                        <td>{tx.name || '--'}</td>
+                        <td>{tx.type || '--'}{tx.subtype ? ` / ${tx.subtype}` : ''}</td>
+                        <td>{tx.quantity != null ? Number(tx.quantity).toLocaleString() : '--'}</td>
+                        <td>{tx.price != null ? formatCurrency(tx.price) : '--'}</td>
+                        <td>{tx.amount != null ? formatCurrency(tx.amount) : '--'}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="card operations-table-card">
+            <div className="card-label">SYNC LOGS</div>
+            <h2>Manual Sync History</h2>
+            <div className="positions">
+              <table className="positions-table">
+                <thead>
+                  <tr>
+                    <SortTh label="Time" sortKey="started_at" currentKey={syncSortKey} currentDir={syncSortDir} onSort={syncSort} />
+                    <SortTh label="Institution" sortKey="institution_name" currentKey={syncSortKey} currentDir={syncSortDir} onSort={syncSort} />
+                    <SortTh label="Status" sortKey="status" currentKey={syncSortKey} currentDir={syncSortDir} onSort={syncSort} />
+                    <th>Accounts</th>
+                    <th>Holdings</th>
+                    <th>Transactions</th>
+                    <th>Duration (ms)</th>
+                    <th>Message</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedSyncLogs.length === 0 ? (
+                    <tr><td colSpan="8" className="empty-state">No sync logs yet.</td></tr>
+                  ) : (
+                    sortedSyncLogs.map((log) => (
+                      <tr key={log.id}>
+                        <td>{log.started_at ? new Date(log.started_at).toLocaleString() : '--'}</td>
+                        <td>{log.institution_name || '--'}</td>
+                        <td className={log.status === 'success' ? 'positive' : 'negative'}>{log.status}</td>
+                        <td>{log.accounts_synced ?? 0}</td>
+                        <td>{log.holdings_synced ?? 0}</td>
+                        <td>{log.transactions_synced ?? 0}</td>
+                        <td>{log.duration_ms ?? '--'}</td>
+                        <td>{log.message || '--'}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
