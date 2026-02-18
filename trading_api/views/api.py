@@ -643,6 +643,25 @@ NON_EXECUTED_ORDER_STATUSES = {
     'api_error',
 }
 
+TRADE_SIDE_ALIASES = {
+    'BUY': 'BUY',
+    'BOT': 'BUY',
+    'B': 'BUY',
+    'BTO': 'BUY',
+    'BTC': 'BUY',
+    'SELL': 'SELL',
+    'SLD': 'SELL',
+    'S': 'SELL',
+    'STO': 'SELL',
+    'STC': 'SELL',
+}
+
+
+def normalize_trade_side(side) -> str:
+    """Normalize broker side tokens (BUY/SELL/BOT/SLD/etc.) to BUY|SELL."""
+    token = str(side or '').strip().upper()
+    return TRADE_SIDE_ALIASES.get(token, '')
+
 
 def normalize_order_status(status) -> str:
     """Normalize broker/order status text to lowercase token form."""
@@ -653,7 +672,7 @@ def normalize_order_status(status) -> str:
 
 def is_countable_trade_record(record: Dict) -> bool:
     """Return True if the record should count as an executed/placed trade."""
-    side = str(record.get('side') or record.get('action') or '').strip().upper()
+    side = normalize_trade_side(record.get('side') or record.get('action'))
     if side not in ('BUY', 'SELL'):
         return False
 
@@ -872,12 +891,18 @@ def sync_trades_to_db(orders, user=None):
         if not order_id:
             continue
 
-        side = order.get('side', '').upper()
+        side = normalize_trade_side(order.get('side'))
         if side not in ('BUY', 'SELL'):
             continue
 
-        qty = int(order.get('qty', 0)) if order.get('qty') else 0
+        qty_val = order.get('qty')
+        if not qty_val:
+            qty_val = order.get('filled_qty')
+        qty = int(qty_val) if qty_val else 0
+
         filled_price = order.get('filled_avg_price')
+        if filled_price is None:
+            filled_price = order.get('filled_price')
         price = filled_price or 0
 
         try:
@@ -890,7 +915,7 @@ def sync_trades_to_db(orders, user=None):
                     'quantity': qty,
                     'price': price,
                     'total_value': qty * float(price) if price else 0,
-                    'order_type': order.get('type', 'market'),
+                    'order_type': order.get('type') or order.get('order_type', 'market'),
                     'status': order.get('status', 'pending'),
                     'filled_qty': int(order.get('filled_qty', 0)) if order.get('filled_qty') else None,
                     'filled_avg_price': filled_price,
@@ -1647,11 +1672,13 @@ class TradesView(APIView):
             for order in orders:
                 qty = order.get('qty', 0)
                 filled_qty = order.get('filled_qty', 0)
+                side = normalize_trade_side(order.get('side'))
+                display_action = side or str(order.get('side', '')).upper()
 
                 broker_trades.append({
                     'id': order.get('id'),
                     'symbol': order.get('symbol'),
-                    'action': order.get('side', '').upper(),
+                    'action': display_action,
                     'quantity': int(qty) if qty else 0,
                     'filled_quantity': int(filled_qty) if filled_qty else 0,
                     'order_type': order.get('type', '').replace('OrderType.', '').replace('order_type.', ''),
@@ -3475,6 +3502,12 @@ class AnalyzeView(APIView):
 
             # Execute trades
             executed = order_manager.execute_trades(valid_trades)
+            try:
+                # Persist freshly executed orders immediately so trade history
+                # remains available even if IBKR session history is sparse.
+                sync_trades_to_db(executed, user=None)
+            except Exception as exc:
+                logger.warning(f"AnalyzeView: immediate trade persistence skipped: {exc}")
             executed_count = count_countable_trades(executed)
             executed_order_ids = [
                 str(order.get('id'))
