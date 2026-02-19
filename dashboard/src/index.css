@@ -2174,6 +2174,16 @@ td {
   font-size: 13px;
 }
 
+.oc-ai-note {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(144, 230, 255, 0.35);
+  background: rgba(144, 230, 255, 0.08);
+  color: #cdefff;
+  font-size: 13px;
+}
+
 .oc-ai-reasoning {
   margin-top: 12px;
   font-size: 13px;

@@ -2829,11 +2829,13 @@ class OptionChainView(APIView):
         Ensures expiration and DTE stay consistent in UI by preferring
         exact expiration matches when present.
         """
+        rec_type = str(recommendation.get('option_type') or '').strip().upper()
         same_type = [
             c for c in candidates
-            if c['option_type'] == recommendation.get('option_type')
+            if str(c.get('option_type') or '').strip().upper() == rec_type
         ]
-        if not same_type:
+        candidate_pool = same_type if same_type else candidates
+        if not candidate_pool:
             return recommendation
 
         rec_exp = str(recommendation.get('expiration') or '').strip()
@@ -2845,7 +2847,7 @@ class OptionChainView(APIView):
             rec_days = int(rec_days)
 
         nearest = min(
-            same_type,
+            candidate_pool,
             key=lambda c: (
                 0 if (rec_exp and c.get('expiration') == rec_exp) else 1,
                 abs(float(c.get('strike') or 0) - rec_strike),
@@ -2853,21 +2855,31 @@ class OptionChainView(APIView):
             )
         )
 
-        # If no exact-expiration candidate was found, sync recommendation
-        # identity to the attached contract to avoid expiration/DTE mismatch.
-        if rec_exp and nearest.get('expiration') != rec_exp:
-            recommendation.update({
-                'expiration': nearest.get('expiration'),
-                'strike': nearest.get('strike'),
-                'premium': nearest.get('premium', recommendation.get('premium')),
-            })
+        llm_premium = recommendation.get('premium')
 
+        # Always synchronize displayed contract fields to the matched chain row.
+        # This avoids showing hallucinated LLM premium/strike values.
         recommendation.update({
+            'option_type': nearest.get('option_type', recommendation.get('option_type')),
+            'expiration': nearest.get('expiration', recommendation.get('expiration')),
+            'strike': nearest.get('strike', recommendation.get('strike')),
+            'premium': nearest.get('premium', recommendation.get('premium')),
+            'bid': nearest.get('bid'),
+            'ask': nearest.get('ask'),
             'open_interest': nearest.get('open_interest', 0),
             'volume': nearest.get('volume', 0),
             'days_to_expiry': nearest.get('days_to_expiry'),
             'implied_volatility_pct': nearest.get('implied_volatility_pct'),
+            'delta': nearest.get('delta'),
+            'theta': nearest.get('theta'),
+            'quote_source': 'chain_mid_price',
+            'matched_from_chain': True,
         })
+        try:
+            if llm_premium is not None:
+                recommendation['llm_premium_raw'] = float(llm_premium)
+        except (TypeError, ValueError):
+            pass
         return recommendation
 
     @staticmethod

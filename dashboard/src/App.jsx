@@ -242,6 +242,13 @@ function OptionChainPage() {
     annualizedPct: opt.annualized_pct,
   })) || [];
   const recommendation = data?.sell_recommendation;
+  const recommendationType = String(recommendation?.option_type || '').trim().toLowerCase();
+  const activeTableType = String(data?.type || formData.type || '').trim().toLowerCase();
+  const recommendationTypeMismatch = Boolean(
+    recommendationType
+    && activeTableType
+    && recommendationType !== activeTableType
+  );
 
   // Custom tooltip for chart
   const ChartTooltip = ({ active, payload }) => {
@@ -416,6 +423,13 @@ function OptionChainPage() {
                 {data?.recommendation_error
                   ? `Recommendation unavailable: ${data.recommendation_error}`
                   : 'No recommendation returned for this query.'}
+              </div>
+            )}
+            {recommendationTypeMismatch && (
+              <div className="oc-ai-note">
+                Recommendation is <strong>{String(recommendation?.option_type || '').toUpperCase()}</strong>, but
+                the table below is filtered to <strong>{activeTableType.toUpperCase()}</strong>. Switch the Type filter
+                to compare this contract directly in the table.
               </div>
             )}
             {recommendation?.reasoning && (
