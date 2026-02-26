@@ -10,7 +10,6 @@ django.setup()
 
 from django.contrib.sites.models import Site
 from allauth.socialaccount.models import SocialApp
-from django.conf import settings
 from urllib.parse import urlparse
 
 
@@ -38,20 +37,24 @@ def _infer_site_domain():
     return 'api.trading.samaanai.com'
 
 
-def _dedupe_social_apps(provider: str):
-    """Keep a single SocialApp for provider and delete duplicates."""
-    apps = list(SocialApp.objects.filter(provider=provider).order_by('id'))
-    if len(apps) <= 1:
-        return apps[0] if apps else None
+def _remove_db_social_apps(provider: str):
+    """
+    Remove DB SocialApp rows for providers configured in settings.
 
-    primary = apps[0]
-    print(f"⚠️  Found {len(apps)} SocialApp rows for provider={provider}; deduplicating...")
-    for duplicate in apps[1:]:
-        for site in duplicate.sites.all():
-            primary.sites.add(site)
-        duplicate.delete()
-        print(f"   Deleted duplicate SocialApp id={duplicate.id}")
-    return primary
+    This project uses SOCIALACCOUNT_PROVIDERS['google']['APP'] in Django settings
+    as the source of truth. Keeping DB SocialApp rows at the same time makes
+    django-allauth see multiple app configs and raise MultipleObjectsReturned.
+    """
+    apps = list(SocialApp.objects.filter(provider=provider).order_by('id'))
+    if not apps:
+        print(f"   No DB SocialApp rows found for provider={provider}")
+        return
+
+    print(f"⚠️  Removing {len(apps)} DB SocialApp row(s) for provider={provider} to avoid allauth duplicate app resolution...")
+    for app in apps:
+        app_id = app.id
+        app.delete()
+        print(f"   Deleted SocialApp id={app_id}")
 
 def setup_social_auth():
     print("🔧 Configuring Google Social Auth...")
@@ -71,7 +74,7 @@ def setup_social_auth():
         site = Site.objects.create(id=1, domain=domain, name=name)
         print(f"✅ Created Site (id=1): {domain}")
 
-    # 2. Configure SocialApp
+    # 2. Validate OAuth env vars (settings-based allauth provider config uses these)
     client_id = os.environ.get('GOOGLE_CLIENT_ID')
     secret = os.environ.get('GOOGLE_CLIENT_SECRET')
     
@@ -80,30 +83,8 @@ def setup_social_auth():
         return
 
     provider = 'google'
-    
-    # Ensure we have only one app row for this provider.
-    app = _dedupe_social_apps(provider)
-    if app:
-        app.client_id = client_id
-        app.secret = secret
-        app.name = 'Google Auth'
-        app.save()
-        print(f"✅ Updated existing SocialApp for {provider}")
-    else:
-        app = SocialApp.objects.create(
-            provider=provider,
-            name='Google Auth',
-            client_id=client_id,
-            secret=secret,
-        )
-        print(f"✅ Created new SocialApp for {provider}")
-    
-    # Link app to site
-    if site not in app.sites.all():
-        app.sites.add(site)
-        print(f"✅ Linked SocialApp to Site: {domain}")
-    else:
-        print(f"   SocialApp already linked to Site: {domain}")
+    _remove_db_social_apps(provider)
+    print("✅ Google OAuth app config will be read from Django settings env vars (GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET)")
 
 if __name__ == '__main__':
     try:
