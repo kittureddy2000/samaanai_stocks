@@ -84,6 +84,40 @@ def get_broker_info():
     return get_broker_name()
 
 
+def _quick_ibkr_tcp_status(timeout_seconds: float = 0.75) -> Tuple[str, int, str]:
+    """Quick IBKR TCP reachability check to avoid long broker retry storms.
+
+    Returns `(host, port, status)` where status is `success`, `skipped`, or a
+    failure string like `failed (code=11)` / `error: ...`.
+    """
+    import socket
+
+    broker_type = os.environ.get('BROKER_TYPE', 'ibkr').lower()
+    host = os.environ.get('IBKR_GATEWAY_HOST', '127.0.0.1')
+    port = int(os.environ.get('IBKR_GATEWAY_PORT', '4002'))
+
+    if broker_type != 'ibkr':
+        return host, port, 'skipped'
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(timeout_seconds)
+    try:
+        code = sock.connect_ex((host, port))
+        return host, port, ('success' if code == 0 else f'failed (code={code})')
+    except Exception as exc:
+        return host, port, f'error: {exc}'
+    finally:
+        sock.close()
+
+
+def _ibkr_fast_fail_reason(timeout_seconds: float = 0.75):
+    """Return a short reason if IBKR should be skipped immediately, else None."""
+    host, port, tcp_status = _quick_ibkr_tcp_status(timeout_seconds=timeout_seconds)
+    if tcp_status in ('success', 'skipped'):
+        return None
+    return f"IBKR quick TCP check failed for {host}:{port}: {tcp_status}"
+
+
 class BrokerClientWrapper:
     """Wrapper to provide backward-compatible dict interface from broker dataclasses."""
 
@@ -849,13 +883,23 @@ def build_operations_summary(days=14):
 
     # Reconcile today's trade count against persisted trade history so this
     # metric matches what users see in Trade History.
-    try:
-        trading_client = get_trading_client()
-        broker_orders = trading_client.get_orders_history(limit=300)
-        if broker_orders:
-            sync_trades_to_db(broker_orders, user=None)
-    except Exception as exc:
-        logger.warning(f"Operations summary broker trade sync skipped: {exc}")
+    #
+    # Important: only attempt broker sync when a quick TCP check has already
+    # succeeded. This prevents this endpoint from waiting on broker retries
+    # (~40s) and timing out in the frontend when IBKR is unavailable.
+    if ibkr_connection == 'success':
+        try:
+            trading_client = get_trading_client()
+            broker_orders = trading_client.get_orders_history(limit=300)
+            if broker_orders:
+                sync_trades_to_db(broker_orders, user=None)
+        except Exception as exc:
+            logger.warning(f"Operations summary broker trade sync skipped: {exc}")
+    else:
+        logger.info(
+            "Operations summary broker trade sync skipped: "
+            f"IBKR TCP check={ibkr_connection}"
+        )
 
     try:
         db_trade_count_today = count_db_trades_for_local_day(timezone.localdate(now))
@@ -1239,6 +1283,15 @@ class PortfolioView(APIView):
         logger.info("PortfolioView.get called")
 
         try:
+            fast_fail_reason = _ibkr_fast_fail_reason(timeout_seconds=0.6)
+            if fast_fail_reason:
+                elapsed = time.time() - start_time
+                logger.warning(
+                    f"PortfolioView.get fast-fail in {elapsed:.2f}s: {fast_fail_reason}, "
+                    "falling back to DB"
+                )
+                return self._fallback_from_db(request)
+
             trading_client = get_trading_client()
             account = trading_client.get_account()
             positions = trading_client.get_positions()
@@ -1409,6 +1462,25 @@ class RiskView(APIView):
         try:
             from trading_api.models import Trade
 
+            fast_fail_reason = _ibkr_fast_fail_reason(timeout_seconds=0.6)
+            if fast_fail_reason:
+                logger.warning(f"RiskView.get fast-fail: {fast_fail_reason}")
+                today = timezone.localdate()
+                daily_trades_db = Trade.objects.filter(
+                    Q(executed_at__date=today) | Q(executed_at__isnull=True, created_at__date=today),
+                    status__in=['filled', 'executed'],
+                ).count()
+                return Response({
+                    'risk_level': 'UNKNOWN',
+                    'daily_trades': int(daily_trades_db or 0),
+                    'daily_loss': 0,
+                    'max_position_value': 0,
+                    'kill_switch_active': False,
+                    'broker_connected': False,
+                    'market_indices': get_market_indices_snapshot(),
+                    'error': fast_fail_reason,
+                })
+
             trading_client = get_trading_client()
             apply_runtime_trading_settings()
             risk_manager = get_risk_manager()
@@ -1484,6 +1556,10 @@ class MarketView(APIView):
         start_time = time.time()
         logger.debug("MarketView.get called")
         try:
+            fast_fail_reason = _ibkr_fast_fail_reason(timeout_seconds=0.6)
+            if fast_fail_reason:
+                raise RuntimeError(fast_fail_reason)
+
             trading_client = get_trading_client()
             is_open = trading_client.is_market_open()
             hours = trading_client.get_market_hours()
@@ -1694,6 +1770,10 @@ class TradesView(APIView):
 
         # Try to get live trades from broker
         try:
+            fast_fail_reason = _ibkr_fast_fail_reason(timeout_seconds=0.6)
+            if fast_fail_reason:
+                raise RuntimeError(fast_fail_reason)
+
             trading_client = get_trading_client()
             orders = trading_client.get_orders_history(limit=100)  # Increased from 30
             broker_connected = True
@@ -2960,14 +3040,31 @@ class OptionChainView(APIView):
 
             ticker = yf.Ticker(symbol)
 
-            # Current stock price
+            # Current stock price + daily % change for source badge.
             current_price = None
+            current_change_pct = None
             try:
+                info = {}
+                price_history = None
                 info = ticker.info
                 current_price = info.get('regularMarketPrice') or info.get('currentPrice')
-                if not current_price:
-                    hist = ticker.history(period='1d')
-                    current_price = float(hist['Close'].iloc[-1]) if len(hist) > 0 else None
+                previous_close = (
+                    info.get('regularMarketPreviousClose')
+                    or info.get('previousClose')
+                )
+
+                if not current_price or not previous_close:
+                    price_history = ticker.history(period='5d')
+                    if not current_price and len(price_history) > 0:
+                        current_price = float(price_history['Close'].iloc[-1])
+                    if not previous_close and len(price_history) >= 2:
+                        previous_close = float(price_history['Close'].iloc[-2])
+
+                if current_price and previous_close:
+                    current_change_pct = round(
+                        ((float(current_price) - float(previous_close)) / float(previous_close)) * 100.0,
+                        2
+                    )
             except Exception as e:
                 logger.warning(f"OptionChainView: could not get price for {symbol}: {e}")
 
@@ -3165,6 +3262,7 @@ class OptionChainView(APIView):
                 'strike': strike,
                 'type': option_type,
                 'current_price': current_price,
+                'current_change_pct': current_change_pct,
                 'options': options_data,
                 'count': len(options_data),
                 'sell_recommendation': recommendation,

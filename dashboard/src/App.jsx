@@ -85,6 +85,15 @@ const formatWholeCurrencyOrDash = (value) => {
   return Number.isFinite(n) ? formatWholeCurrency(n) : '--';
 };
 
+const formatIndexPoints = (value) => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '--';
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n);
+};
+
 const computePremiumPct = (premium, underlyingPrice) => {
   const p = Number(premium);
   const u = Number(underlyingPrice);
@@ -249,6 +258,11 @@ function OptionChainPage() {
     && activeTableType
     && recommendationType !== activeTableType
   );
+  const sourceChangePct = Number(data?.current_change_pct);
+  const hasSourceChangePct = Number.isFinite(sourceChangePct);
+  const sourceChangeClass = hasSourceChangePct
+    ? (sourceChangePct >= 0 ? 'positive' : 'negative')
+    : '';
 
   // Custom tooltip for chart
   const ChartTooltip = ({ active, payload }) => {
@@ -296,6 +310,11 @@ function OptionChainPage() {
               <div className="oc-source-value">
                 <span className="oc-source-dot active"></span>
                 {data.symbol} &mdash; ${data.current_price?.toFixed(2)}
+                {hasSourceChangePct && (
+                  <span className={sourceChangeClass}>
+                    ({sourceChangePct >= 0 ? '+' : ''}{sourceChangePct.toFixed(2)}%)
+                  </span>
+                )}
               </div>
               <div className="oc-source-detail">{data.count} expirations loaded via yfinance</div>
             </>
@@ -2302,29 +2321,17 @@ function App() {
 
   const fetchData = useCallback(async () => {
     try {
-      const results = await Promise.allSettled([
-        getPortfolio(),
-        getRisk(),
+      // Stage requests to avoid flooding the backend with multiple IBKR-dependent
+      // calls at once. This reduces worker saturation during broker timeouts and
+      // improves login/dashboard load reliability.
+      const lightResults = await Promise.allSettled([
         getMarket(),
         getWatchlist(),
-        getTrades(),
         getAgentStatus(),
         getConfig(),
       ]);
 
-      const [portfolioRes, riskRes, marketRes, watchlistRes, tradesRes, agentStatusRes, configRes] = results;
-
-      if (portfolioRes.status === 'fulfilled') {
-        setPortfolio(portfolioRes.value);
-      } else {
-        console.error('Portfolio fetch failed:', portfolioRes.reason);
-      }
-
-      if (riskRes.status === 'fulfilled') {
-        setRisk(riskRes.value);
-      } else {
-        console.error('Risk fetch failed:', riskRes.reason);
-      }
+      const [marketRes, watchlistRes, agentStatusRes, configRes] = lightResults;
 
       if (marketRes.status === 'fulfilled') {
         setMarket(marketRes.value);
@@ -2336,12 +2343,6 @@ function App() {
         setWatchlist(watchlistRes.value.watchlist || []);
       } else {
         console.error('Watchlist fetch failed:', watchlistRes.reason);
-      }
-
-      if (tradesRes.status === 'fulfilled') {
-        setTrades(tradesRes.value.trades || []);
-      } else {
-        console.error('Trades fetch failed:', tradesRes.reason);
       }
 
       if (agentStatusRes.status === 'fulfilled') {
@@ -2356,8 +2357,37 @@ function App() {
         console.error('Config fetch failed:', configRes.reason);
       }
 
+      // Render shell early even if heavier broker-backed requests are still pending.
       setLastUpdated(new Date().toLocaleTimeString());
       setLoading(false);
+
+      const heavyResults = await Promise.allSettled([
+        getPortfolio(),
+        getRisk(),
+        getTrades(),
+      ]);
+
+      const [portfolioRes, riskRes, tradesRes] = heavyResults;
+
+      if (portfolioRes.status === 'fulfilled') {
+        setPortfolio(portfolioRes.value);
+      } else {
+        console.error('Portfolio fetch failed:', portfolioRes.reason);
+      }
+
+      if (riskRes.status === 'fulfilled') {
+        setRisk(riskRes.value);
+      } else {
+        console.error('Risk fetch failed:', riskRes.reason);
+      }
+
+      if (tradesRes.status === 'fulfilled') {
+        setTrades(tradesRes.value.trades || []);
+      } else {
+        console.error('Trades fetch failed:', tradesRes.reason);
+      }
+
+      setLastUpdated(new Date().toLocaleTimeString());
     } catch (error) {
       console.error('Failed to fetch data:', error);
       setLoading(false);
@@ -2656,7 +2686,7 @@ function App() {
                     <div key={idx.key} className="risk-market-chip">
                       <span className="risk-market-label">{idx.label}</span>
                       <span className="risk-market-price">
-                        {Number.isFinite(Number(idx.price)) ? formatCurrency(Number(idx.price)) : '--'}
+                        {Number.isFinite(Number(idx.price)) ? formatIndexPoints(Number(idx.price)) : '--'}
                       </span>
                       <span className={`risk-market-change ${idx.hasChange ? (idx.change >= 0 ? 'positive' : 'negative') : ''}`}>
                         {idx.hasChange ? `${idx.change >= 0 ? '+' : ''}${idx.change.toFixed(2)} (${idx.changePct >= 0 ? '+' : ''}${idx.changePct.toFixed(2)}%)` : '--'}

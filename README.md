@@ -12,6 +12,12 @@ This section documents what the application currently does in production.
 - Email/password login and registration.
 - JWT-based API auth (access + refresh tokens).
 - Authorized email allow-list support (`AUTHORIZED_EMAILS`).
+- Production OAuth redirect flow:
+  1. Frontend opens `/accounts/google/login/` (allauth).
+  2. Google returns to `/accounts/google/login/callback/`.
+  3. Custom allauth adapter generates JWT access/refresh tokens.
+  4. Backend redirects to frontend `/auth/callback?...tokens...`.
+  5. Frontend stores tokens and validates session with `/auth/me`.
 
 ### 2) Dashboard Pages and User Flows
 
@@ -111,6 +117,10 @@ Primary Cloud SQL models used operationally:
   - Analyze job during trading hours.
   - Daily summary job near close/end of day.
 - GitHub Actions handles CI/CD for staging and production.
+- Backend container bootstrap currently runs migrations, OAuth config bootstrap
+  (`scripts/fix_google_auth.py`), and `collectstatic` before Gunicorn starts.
+  This makes cold starts heavier than a typical stateless API and can amplify
+  timeout symptoms during broker outages or traffic spikes.
 
 ### 10) Safety and Failure Behavior
 
@@ -526,6 +536,42 @@ npm start
 # Opens http://localhost:3000
 ```
 
+## Moving to a New Laptop (Preserve Context)
+
+There are two categories of context to preserve:
+
+1. Project/application context (code + docs + deployment knowledge)
+2. Local tooling context (Codex settings/skills/automations + local credentials)
+
+### What to Keep
+
+- Project repo (clone from Git)
+- `README.md` (architecture, runtime model, deployment, troubleshooting)
+- `APP_CONTEXT.md` (project-specific operational context)
+- Optional local env files for development: `.env`, `.env.debug`
+- Optional Codex local data directory (typically `~/.codex/`) for skills, automations, and preferences
+
+### What to Re-Authenticate on the New Machine
+
+- GitHub (SSH key or `gh auth login`)
+- Google Cloud SDK (`gcloud auth login`)
+- Application default credentials if needed (`gcloud auth application-default login`)
+
+### New Laptop Setup Checklist
+
+1. Install prerequisites: Git, Python, Node, Docker, Google Cloud SDK.
+2. Clone the repository.
+3. (Optional) Copy `~/.codex/` from old laptop to preserve Codex local context.
+4. Restore local `.env` files only if needed for local development.
+5. Re-authenticate GitHub and GCP.
+6. Verify access with `gcloud config list` and `git remote -v`.
+7. Run backend/frontend locally once to validate environment.
+
+### What Not to Copy
+
+- Production secrets from Cloud Run/Secret Manager (keep them in Secret Manager)
+- Local SQLite DBs unless you explicitly want local historical snapshots (`db.sqlite3`, `trading_history.db`)
+
 ### Docker Compose (Full Stack)
 
 ```bash
@@ -602,6 +648,9 @@ git merge staging
 git push origin main
 # GitHub Actions auto-deploys to Cloud Run
 ```
+
+Note: The backend image must include `/scripts` because `entrypoint.sh` runs
+`scripts/fix_google_auth.py` during startup.
 
 ---
 
@@ -842,6 +891,7 @@ All indicators are implemented in pure pandas with no external TA library depend
 | "429 RESOURCE_EXHAUSTED" | Gemini quota exceeded | Wait for daily reset |
 | OAuth redirect wrong URL | FRONTEND_URL misconfigured | Update Cloud Run env var |
 | VM stopped | Spot preemption | Run `gcloud compute instances start` |
+| Google sign-in hangs / times out intermittently | Cloud Run workers saturated by IBKR timeout retries | Restore IBKR gateway, reduce dashboard request fan-out, add fast-fail broker checks |
 
 ### View Cloud Run Logs
 
@@ -870,6 +920,28 @@ gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap \
 gcloud compute ssh ibkr-gateway --zone=us-west1-b --tunnel-through-iap \
   --command='docker inspect ibgateway --format "{{range .Config.Env}}{{println .}}{{end}}" | grep -E "IBC_|TWS_|TRADING"'
 ```
+
+### Google Sign-In Slow / 504 (Intermittent)
+
+If `GET /accounts/google/login/` or `GET /auth/me` returns `504` only sometimes:
+
+- Confirm OAuth config first (client ID/secret, redirect URLs).
+- Then check whether the same time window has repeated IBKR timeout logs.
+
+Observed production pattern:
+
+- OAuth endpoints succeed when backend is healthy.
+- During IBKR gateway slow/down periods, multiple dashboard endpoints can block on
+  broker connection retries (tens of seconds).
+- This can saturate Gunicorn workers/threads and cause unrelated endpoints,
+  including auth endpoints, to return `504`.
+
+Mitigations:
+
+1. Keep the IBKR Gateway VM healthy (especially if using Spot/preemptible VM).
+2. Stage frontend data loading (light endpoints first, heavy broker-backed endpoints after render).
+3. Fast-fail broker-dependent endpoints when a quick health check already shows broker issues.
+4. Move expensive startup bootstrap work (migrations/collectstatic) out of Cloud Run startup where possible.
 
 ---
 

@@ -19,6 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ ./src/
 COPY backend/ ./backend/
 COPY trading_api/ ./trading_api/
+COPY scripts/ ./scripts/
 COPY manage.py .
 
 # Note: We skip collectstatic during build because the src/ imports require
