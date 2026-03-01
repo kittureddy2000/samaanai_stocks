@@ -2021,8 +2021,9 @@ function App() {
     if (accessToken) {
       // Store tokens in localStorage
       setTokens(accessToken, refreshToken);
-      // Clean URL (remove query params) so it looks normal
-      window.history.replaceState({}, '', window.location.pathname);
+      // Clean callback URL and land on app root after OAuth.
+      const nextPath = window.location.pathname === '/auth/callback' ? '/' : window.location.pathname;
+      window.history.replaceState({}, '', nextPath);
     }
   }, []);
 
@@ -2568,7 +2569,7 @@ function App() {
                       setProfileSubmenu(null);
                     }}
                   >
-                    <span>Plaid Integrations</span>
+                    <span>My Portfolio</span>
                   </button>
 
                   <button
@@ -2666,7 +2667,7 @@ function App() {
           className={`nav-tab ${currentPage === 'plaid' ? 'active' : ''}`}
           onClick={() => setCurrentPage('plaid')}
         >
-          Plaid
+          My Portfolio
         </button>
       </nav>
 

@@ -191,7 +191,7 @@ jobs:
         working-directory: dashboard
         run: |
           docker build \
-            --build-arg VITE_API_URL=https://api.trading.samaanai.com \
+            --build-arg VITE_API_URL=${{ steps.backend-url.outputs.url }} \
             -t gcr.io/$GCP_PROJECT/$FRONTEND_SERVICE:${{ github.sha }} .
           docker push gcr.io/$GCP_PROJECT/$FRONTEND_SERVICE:${{ github.sha }}
 
